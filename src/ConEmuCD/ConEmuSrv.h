@@ -60,21 +60,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define DEBUGLOGSIZE(s) DEBUGSTR(s)
 #define DEBUGLOGLANG(s) //DEBUGSTR(s) //; Sleep(2000)
 
-class CLogFunction
-{
-protected:
-	static int m_FnLevel; // without per-thread division
-	bool mb_Logged;
-public:
-	CLogFunction();
-	CLogFunction(const char* asFnName);
-	CLogFunction(const wchar_t* asFnName);
-	void DoLogFunction(const wchar_t* asFnName);
-	~CLogFunction();
-};
-#define LogFunction_Cat2(n,i) n##i
-#define LogFunction_Cat1(n,i) LogFunction_Cat2(n,i)
-#define LogFunction(fn) CLogFunction LogFunction_Cat1(logFunction,__COUNTER__)(fn)
+#include "LogFunction.h"
 
 #ifdef _DEBUG
 //CRITICAL_ SECTION gcsHeap;
@@ -195,12 +181,12 @@ extern wchar_t gszDbgModLabel[6];
 
 #define START_MAX_PROCESSES 1000
 #define CHECK_PROCESSES_TIMEOUT 500
-#define CHECK_ANTIVIRUS_TIMEOUT 6*1000
-#define CHECK_ROOTSTART_TIMEOUT 10*1000
+#define CHECK_ANTIVIRUS_TIMEOUT (6*1000)
+#define CHECK_ROOTSTART_TIMEOUT (10*1000)
 #ifdef _DEBUG
 	#define CHECK_ROOTOK_TIMEOUT (IsDebuggerPresent() ? ((DWORD)-1) : (10*1000)) // под отладчиком - ждать всегда
 #else
-	#define CHECK_ROOTOK_TIMEOUT 10*1000
+	#define CHECK_ROOTOK_TIMEOUT (10*1000)
 #endif
 #define MAX_FORCEREFRESH_INTERVAL 500
 #define MAX_SYNCSETSIZE_WAIT 1000
@@ -284,7 +270,7 @@ void SetupCreateDumpOnException();
 int ComspecInit();
 void ComspecDone(int aiRc);
 bool CoordInSmallRect(const COORD& cr, const SMALL_RECT& rc);
-void RefillConsoleAttributes(const CONSOLE_SCREEN_BUFFER_INFO& csbi5, WORD OldText, WORD NewText);
+void RefillConsoleAttributes(const CONSOLE_SCREEN_BUFFER_INFO& csbi5, const WORD wOldText, const WORD wNewText);
 BOOL SetConsoleSize(USHORT BufferHeight, COORD crNewSize, SMALL_RECT rNewRect, LPCSTR asLabel = NULL, bool bForceWriteLog = false);
 void CreateLogSizeFile(int nLevel, const CESERVER_CONSOLE_MAPPING_HDR* pConsoleInfo = NULL);
 void LogSize(const COORD* pcrSize, int newBufferHeight, LPCSTR pszLabel, bool bForceWriteLog = false);
@@ -406,7 +392,11 @@ bool IsAutoAttachAllowed();
 /* Console Handles */
 //extern MConHandle ghConIn;
 extern MConHandle ghConOut;
+extern MConHandle gPrimaryBuffer, gAltBuffer;
+extern USHORT gnPrimaryBufferLastRow;
 void ConOutCloseHandle();
+bool CmdOutputOpenMap(CONSOLE_SCREEN_BUFFER_INFO& lsbi, CESERVER_CONSAVE_MAPHDR*& pHdr, CESERVER_CONSAVE_MAP*& pData);
+bool isReopenHandleAllowed();
 
 
 typedef enum tag_RunMode
@@ -525,7 +515,6 @@ struct SrvInfo
 	bool   bServerForcedTermination;
 	//
 	OSVERSIONINFO osv;
-	BOOL bReopenHandleAllowed;
 	UINT nMaxFPS;
 	//
 	MSection *csAltSrv;
@@ -646,30 +635,6 @@ extern HMODULE ghOurModule;
 #define USER_ACTIVITY ((gnBufferHeight == 0) || ((GetTickCount() - gpSrv->dwLastUserTick) <= USER_IDLE_TIMEOUT))
 
 void PrintVersion();
-
-//#pragma pack(push, 1)
-//extern CESERVER_CONSAVE* gpStoredOutput;
-//#pragma pack(pop)
-//extern MSection* gpcsStoredOutput;
-
-//typedef struct tag_CmdInfo
-//{
-//	DWORD dwFarPID;
-//	//DWORD dwSrvPID;
-//	BOOL  bK;
-//	//BOOL  bNonGuiMode; // Если запущен НЕ в консоли, привязанной к GUI. Может быть из-за того, что работает как COMSPEC
-//	CONSOLE_SCREEN_BUFFER_INFO sbi;
-//	BOOL  bNewConsole;
-//	//DWORD nExitCode;
-//	wchar_t szComSpecName[32];
-//	wchar_t szSelfName[32];
-//	wchar_t *pszPreAliases;
-//	DWORD nPreAliasSize;
-//	// По завершении ComSpec не отключать буфер
-//	//BOOL  bWasBufferHeight;
-//} CmdInfo;
-//
-//extern CmdInfo* gpSrv;
 
 extern COORD gcrVisibleSize;
 extern BOOL  gbParmVisibleSize, gbParmBufSize;

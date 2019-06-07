@@ -30,7 +30,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define _COMMON_HEADER_HPP_
 
 // Interface version
-#define CESERVER_REQ_VER    166
+#define CESERVER_REQ_VER    167
 
 // Max tabs/panes count
 #define MAX_CONSOLE_COUNT 30
@@ -76,17 +76,29 @@ typedef struct _CONSOLE_SELECTION_INFO
 #define CES_NTVDM 0x10
 #define CEC_INITTITLE       L"ConEmu"
 
-#define VirtualConsoleClass L"VirtualConsoleClass" // окна отрисовки
-#define VirtualConsoleClassMain L"VirtualConsoleClass" // главное окно
-#define VirtualConsoleClassApp L"VirtualConsoleClassApp" // специальный Popup (не используется)
-#define VirtualConsoleClassWork L"VirtualConsoleClassWork" // Holder для всех VCon
-#define VirtualConsoleClassBack L"VirtualConsoleClassBack" // Подложка (со скроллерами) для каждого VCon
-#define VirtualConsoleClassGhost L"VirtualConsoleClassGhost"
-#define ConEmuPanelViewClass L"ConEmuPanelView"
+// Our binaries
+#define ConEmuCD_32_DLL L"ConEmuCD.dll"
+#define ConEmuCD_64_DLL L"ConEmuCD64.dll"
+#define ConEmuCD_DLL_3264 WIN3264TEST(ConEmuCD_32_DLL,ConEmuCD_64_DLL)
+
+// Windows and Classes
+#define VirtualConsoleClass L"VirtualConsoleClass" // DC Window
+#define VirtualConsoleClassMain L"VirtualConsoleClass" // Main window (with title/tabs/etc.)
+#define VirtualConsoleClassApp L"VirtualConsoleClassApp" // special Popup (used in some special cases to hide TaskBar icon)
+#define VirtualConsoleClassWork L"VirtualConsoleClassWork" // Holder for all VCon-s
+#define VirtualConsoleClassBack L"VirtualConsoleClassBack" // Underlay (with scrollers) for each VCon
+#define VirtualConsoleClassGhost L"VirtualConsoleClassGhost" // support for Win7 Aero
+#define ConEmuPanelViewClass L"ConEmuPanelView" // Used in Far Manager plugin
 
 #define RealConsoleClass L"ConsoleWindowClass"
 #define WineConsoleClass L"WineConsoleClass"
 // functions isConsoleClass & isConsoleWindow are defined in ConEmuCheck.cpp
+
+// GetWindowLong for VirtualConsoleClassBack
+#define WindowLongBack_ConWnd 0  // 4 bytes data
+#define WindowLongBack_DCWnd  4  // 4 bytes data
+// GetWindowLongPtr for VirtualConsoleClass (DC window)
+#define WindowLongDCWnd_ConWnd 0 // 4/8 bytes (depends on bitness)
 
 // Some ANSI & Controls
 #define DSC 0x90
@@ -354,7 +366,7 @@ enum CONSOLE_KEY_ID
 	ID_CTRLESC,
 };
 
-#define EvalBufferTurnOnSize(Now) (2*Now+32)
+#define EvalBufferTurnOnSize(Now) (2 * (Now) + 32)
 
 enum RealBufferScroll
 {
@@ -532,6 +544,7 @@ const CECMD
 	CECMD_SSHAGENTSTART  = 94, // dwData[0] - PID of ssh-agent.exe started from one of the ConEmu console processes
 	CECMD_FINDNEXTROWID  = 95, // IN: dwData[0] - from row, dwData[1] - search upward (TRUE/FALSE); OUT: dwData[0] - found row or DWORD(-1), dwData[1] - rowid
 	CECMD_STARTCONNECTOR = 96, // IN: Data[0] - ASCIIZ string for mount prefix, e.g. "/cygdrive" or just empty "".
+	CECMD_STARTPTYSRV    = 97, // IN: Data[0] - start=TRUE, stop=FALSE; OUT: handles for connector qwData[0] - read_input, qwData[1] - write_output
 /** Команды FAR плагина **/
 	CMD_FIRST_FAR_CMD    = 200,
 	CMD_DRAGFROM         = 200,
@@ -1225,7 +1238,7 @@ const ConEmuConsoleFlags
 	;
 #define SetConEmuFlags(v,m,f) (v) = ((v) & ~(m)) | (f)
 
-typedef ConEmuConsoleFlags DWORD;
+typedef DWORD ConEmuConsoleFlags;
 const ConEmuConsoleFlags
 	ccf_Active   = 1,
 	ccf_Visible  = 2,
@@ -1390,7 +1403,7 @@ struct CESERVER_REQ_HDR
 	HANDLE2  hModule;
 };
 
-#define CHECK_CMD_SIZE(pCmd,data_size) ((pCmd)->hdr.cbSize >= (sizeof(CESERVER_REQ_HDR) + data_size))
+#define CHECK_CMD_SIZE(pCmd,data_size) ((pCmd)->hdr.cbSize >= (sizeof(CESERVER_REQ_HDR) + (data_size)))
 
 
 struct CESERVER_CHAR_HDR
@@ -1524,6 +1537,7 @@ struct CEFAR_INFO_MAPPING
 struct ConEmuAnsiLog
 {
 	BOOL    Enabled;
+	BOOL    LogAnsiCodes;
 	// Full path with name of log-file
 	wchar_t Path[MAX_PATH];
 };
@@ -1553,6 +1567,9 @@ struct CESERVER_CONSOLE_MAPPING_HDR
 	//
 	DWORD nAltServerPID;  //
 	DWORD ActiveServerPID() const { return nAltServerPID ? nAltServerPID : nServerPID; };
+
+	/// When started "ConEmuC -std -c far.exe" connector shall pause reading input
+	DWORD stdConBlockingPID;
 
 	// Root(!) ConEmu window
 	HWND2 hConEmuRoot;
@@ -2243,6 +2260,7 @@ enum ALTBUFFER_FLAGS
 	abf_RestoreContents = 0x0002,
 	abf_BufferOn        = 0x0004,
 	abf_BufferOff       = 0x0008,
+	abf_Connector       = 0x0010,
 };
 
 struct CESERVER_REQ_ALTBUFFER
@@ -2446,6 +2464,7 @@ struct AnnotationInfo;
 typedef int (WINAPI* RequestLocalServer_t)(/*[IN/OUT]*/RequestLocalServerParm* Parm);
 typedef BOOL (WINAPI* ExtendedConsoleWriteText_t)(HANDLE hConsoleOutput, const AnnotationInfo* Attributes, const wchar_t* Buffer, DWORD nNumberOfCharsToWrite, LPDWORD lpNumberOfCharsWritten);
 typedef void (WINAPI* ExtendedConsoleCommit_t)();
+typedef int (WINAPI* SrvLogString_t)(const wchar_t* str);
 typedef DWORD RequestLocalServerFlags;
 const RequestLocalServerFlags
 	slsf_SetOutHandle      = 1,
@@ -2474,6 +2493,7 @@ struct RequestLocalServerParm
 	/*[OUT]*/ DWORD_PTR nPrevAltServerPID; // alignment
 	/*[OUT]*/ HANDLE hFarCommitEvent;
 	/*[OUT]*/ HANDLE hCursorChangeEvent;
+	/*[OUT]*/ SrvLogString_t fSrvLogString;
 };
 
 

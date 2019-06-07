@@ -137,7 +137,7 @@
     <ClCompile>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
-      <PreprocessorDefinitions>WIN32;_WIN32;NDEBUG;HIDE_TODO;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_WIN32;NDEBUG;HIDE_TODO;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <Optimization>MinSpace</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -147,7 +147,7 @@
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <ResourceCompile>
-      <PreprocessorDefinitions>WIN32;_WIN32;NDEBUG;HIDE_TODO;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_WIN32;NDEBUG;HIDE_TODO;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -164,7 +164,7 @@
     <ClCompile>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
-      <PreprocessorDefinitions>WIN64;_WIN64;NDEBUG;HIDE_TODO;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN64;_WIN64;NDEBUG;HIDE_TODO;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <Optimization>MinSpace</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -174,7 +174,7 @@
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <ResourceCompile>
-      <PreprocessorDefinitions>WIN64;_WIN64;NDEBUG;HIDE_TODO;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN64;_WIN64;NDEBUG;HIDE_TODO;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -191,13 +191,13 @@
     <ClCompile>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
-      <PreprocessorDefinitions>WIN32;_WIN32;_DEBUG;HIDE_TODO;MSGLOGGER;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_WIN32;_DEBUG;HIDE_TODO;MSGLOGGER;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
       <Optimization>Disabled</Optimization>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
     </ClCompile>
     <ResourceCompile>
-      <PreprocessorDefinitions>WIN32;_WIN32;_DEBUG;HIDE_TODO;MSGLOGGER;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_WIN32;_DEBUG;HIDE_TODO;MSGLOGGER;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -212,13 +212,13 @@
     <ClCompile>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
-      <PreprocessorDefinitions>WIN64;_WIN64;_DEBUG;HIDE_TODO;MSGLOGGER;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN64;_WIN64;_DEBUG;HIDE_TODO;MSGLOGGER;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
       <Optimization>Disabled</Optimization>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
     </ClCompile>
     <ResourceCompile>
-      <PreprocessorDefinitions>WIN64;_WIN64;_DEBUG;HIDE_TODO;MSGLOGGER;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN64;_WIN64;_DEBUG;HIDE_TODO;MSGLOGGER;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -233,13 +233,13 @@
     <ClCompile>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
-      <PreprocessorDefinitions>WIN32;_WIN32;_DEBUG;HIDE_TODO;MSGLOGGER;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_WIN32;_DEBUG;HIDE_TODO;MSGLOGGER;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
       <Optimization>Disabled</Optimization>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
     </ClCompile>
     <ResourceCompile>
-      <PreprocessorDefinitions>WIN32;_WIN32;_DEBUG;HIDE_TODO;MSGLOGGER;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_WIN32;_DEBUG;HIDE_TODO;MSGLOGGER;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -254,13 +254,13 @@
     <ClCompile>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
-      <PreprocessorDefinitions>WIN64;_WIN64;_DEBUG;HIDE_TODO;MSGLOGGER;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN64;_WIN64;_DEBUG;HIDE_TODO;MSGLOGGER;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
       <Optimization>Disabled</Optimization>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
     </ClCompile>
     <ResourceCompile>
-      <PreprocessorDefinitions>WIN64;_WIN64;_DEBUG;HIDE_TODO;MSGLOGGER;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN64;_WIN64;_DEBUG;HIDE_TODO;MSGLOGGER;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -273,6 +273,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="ConEmuCD\Actions.h" />
+    <ClInclude Include="ConEmuCD\ConAnsi.h" />
+    <ClInclude Include="ConEmuCD\ConAnsiImpl.h" />
+    <ClInclude Include="ConEmuCD\ConData.h" />
     <ClInclude Include="ConEmuCD\ConEmuSrv.h" />
     <ClInclude Include="ConEmuCD\ConProcess.h" />
     <ClInclude Include="ConEmuCD\ConsoleHelp.h" />
@@ -282,8 +285,10 @@
     <ClInclude Include="ConEmuCD\GuiHooks.h" />
     <ClInclude Include="ConEmuCD\GuiMacro.h" />
     <ClInclude Include="ConEmuCD\Infiltrate.h" />
+    <ClInclude Include="ConEmuCD\LogFunction.h" />
     <ClInclude Include="ConEmuCD\MapDump.h" />
     <ClInclude Include="ConEmuCD\Queue.h" />
+    <ClInclude Include="ConEmuCD\Shutdown.h" />
     <ClInclude Include="ConEmuCD\SrvCommands.h" />
     <ClInclude Include="ConEmuCD\SrvPipes.h" />
     <ClInclude Include="ConEmuCD\StartEnv.h" />
@@ -295,6 +300,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ConEmuCD\Actions.cpp" />
+    <ClCompile Include="ConEmuCD\ConAnsi.cpp" />
+    <ClCompile Include="ConEmuCD\ConAnsiImpl.cpp" />
+    <ClCompile Include="ConEmuCD\ConData.cpp" />
     <ClCompile Include="ConEmuCD\ConEmuCmd.cpp" />
     <ClCompile Include="ConEmuCD\ConEmuSrv.cpp" />
     <ClCompile Include="ConEmuCD\ConProcess.cpp" />
@@ -305,8 +313,10 @@
     <ClCompile Include="ConEmuCD\GuiMacro.cpp" />
     <ClCompile Include="ConEmuCD\Infiltrate.cpp" />
     <ClCompile Include="ConEmuCD\InjectRemote.cpp" />
+    <ClCompile Include="ConEmuCD\LogFunction.cpp" />
     <ClCompile Include="ConEmuCD\MapDump.cpp" />
     <ClCompile Include="ConEmuCD\Queue.cpp" />
+    <ClCompile Include="ConEmuCD\Shutdown.cpp" />
     <ClCompile Include="ConEmuCD\SrvCommands.cpp" />
     <ClCompile Include="ConEmuCD\SrvPipes.cpp" />
     <ClCompile Include="ConEmuCD\StartEnv.cpp" />

@@ -52,6 +52,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 //typedef HRESULT(WINAPI* FDwmIsCompositionEnabled)(BOOL *pfEnabled);
 
+class CAltNumpad;
 class CAttachDlg;
 class CConEmuBack;
 class CConEmuChild;
@@ -60,6 +61,7 @@ class CConEmuMacro;
 class CConEmuMenu;
 class CDefaultTerminal;
 class CGestures;
+class CPushInfo;
 class CRecreateDlg;
 class CRunQueue;
 class CStatus;
@@ -68,14 +70,13 @@ class CToolTip;
 class CVConGroup;
 class CVConGuard;
 class MFileLogEx;
-struct MSectionSimple;
-struct MSectionLockSimple;
 enum ConEmuWindowMode;
 struct CEFindDlg;
-union CESize;
-class CPushInfo;
-class CAltNumpad;
 struct HandleMonitor;
+struct MSectionLockSimple;
+struct MSectionSimple;
+struct SystemEnvironment;
+union CESize;
 
 struct ConsoleInfoArg
 {
@@ -85,6 +86,9 @@ struct ConsoleInfoArg
 	CONSOLE_CURSOR_INFO cInfo;
 	TOPLEFTCOORD TopLeft;
 };
+
+#include <memory>
+#include <mutex>
 
 #include "DwmHelper.h"
 #include "TaskBar.h"
@@ -166,7 +170,8 @@ class CConEmuMain
 		void SetWindowIcon(LPCWSTR asNewIcon);
 		void SetTaskbarIcon(HICON ahNewIcon);
 		CPushInfo *mp_PushInfo = nullptr;
-		BOOL mb_DosBoxExists = FALSE;
+		bool mb_DosBoxExists = false;
+		bool CheckDosBoxExists();
 		ConEmuInstallMode m_InstallMode = cm_Normal;
 		bool isMingwMode();
 		bool isMSysStartup();
@@ -181,8 +186,6 @@ class CConEmuMain
 		} m_DbgInfo;
 	private:
 		bool CheckBaseDir();
-		BOOL CheckDosBoxExists();
-		void FinalizePortableReg();
 		bool mb_ForceUseRegistry = false;
 		bool mb_SpecialConfigPath = false;
 		wchar_t ms_ConEmuXml[MAX_PATH+1] = L"";       // полный путь к портабельным настройкам
@@ -286,40 +289,40 @@ class CConEmuMain
 	public:
 		StartupStage GetStartupStage() const;
 
-		struct
+		struct MouseState
 		{
-			WORD  state;
-			bool  bSkipRDblClk;
-			bool  bIgnoreMouseMove;
-			bool  bCheckNormalRect; // call StoreNormalRect after resize in main timer
+			WORD  state = 0;
+			bool  bSkipRDblClk = false;
+			bool  bIgnoreMouseMove = false;
+			bool  bCheckNormalRect = false; // call StoreNormalRect after resize in main timer
 
-			COORD LClkDC, LClkCon;
-			POINT LDblClkDC; // заполняется в PatchMouseEvent
-			DWORD LDblClkTick;
-			COORD RClkDC, RClkCon;
-			DWORD RClkTick;
+			COORD LClkDC = {}, LClkCon = {};
+			POINT LDblClkDC = {}; // filled in PatchMouseEvent
+			DWORD LDblClkTick = 0;
+			COORD RClkDC = {}, RClkCon = {};
+			DWORD RClkTick = 0;
 
-			// Для обработки gpSet->isActivateSplitMouseOver
-			POINT  ptLastSplitOverCheck;
+			// For processing in gpSet->isActivateSplitMouseOver
+			POINT  ptLastSplitOverCheck = {};
 
-			// Чтобы не слать в консоль бесконечные WM_MOUSEMOVE
-			UINT   lastMsg;
+			// To avoid infinite WM_MOUSEMOVE posting to the console
+			UINT   lastMsg = 0;
 			WPARAM lastMMW = (WPARAM)-1;
 			LPARAM lastMML = (LPARAM)-1;
 
-			// Пропустить клик мышкой (окно было неактивно)
-			UINT nSkipEvents[2]; UINT nReplaceDblClk;
+			// Skip the mouse click (window was inactive)
+			UINT nSkipEvents[2] = {}; UINT nReplaceDblClk = 0;
 			// Activated by touch, skip next "activation" emulated by real mouse click
-			BOOL bTouchActivation;
-			// не пропускать следующий клик в консоль!
-			BOOL bForceSkipActivation;
+			bool bTouchActivation = false;
+			// Don't pass next click into the console!
+			bool bForceSkipActivation = false;
 
-			// таскание окошка за клиентскую область
-			POINT ptWndDragStart;
-			RECT  rcWndDragStart;
+			// Drag the window by client area
+			POINT ptWndDragStart = {};
+			RECT  rcWndDragStart = {};
 
-			// настройки скролла мышкой (сколько линий/символов "за клик")
-			UINT nWheelScrollChars, nWheelScrollLines;
+			// Settings from Windows - how many rows/chars we shall scroll by one step
+			UINT nWheelScrollChars = 0, nWheelScrollLines = 0;
 			void  ReloadWheelScroll()
 			{
 				#ifndef SPI_GETWHEELSCROLLCHARS
@@ -621,7 +624,7 @@ class CConEmuMain
 		void DebugStep(LPCWSTR asMsg, BOOL abErrorSeverity=FALSE);
 		void ForceShowTabs(BOOL abShow);
 		DWORD_PTR GetActiveKeyboardLayout();
-		bool isTabsShown();
+		bool isTabsShown() const;
 
 	public:
 		void Destroy(bool abForce = false);
@@ -846,6 +849,13 @@ class CConEmuMain
 			MSectionLockSimple* pcsLock;
 			bool wait;
 		} m_LockConhostStart = {};
+
+	public:
+		void ReloadEnvironmentVariables();
+		std::shared_ptr<SystemEnvironment> GetEnvironmentVariables() const;
+	private:
+		std::shared_ptr<SystemEnvironment> saved_environment_;
+		mutable std::mutex saved_environment_mutex_;
 };
 
 // Message Logger

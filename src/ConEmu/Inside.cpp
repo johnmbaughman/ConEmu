@@ -447,9 +447,9 @@ HWND CConEmuInside::InsideFindParent()
 		// Если в проводнике уже есть ConEmu - открыть в нем новую вкладку
 		gpSetCls->SingleInstanceShowHide = sih_None;
 		LPCWSTR pszCmdLine = GetCommandLine();
-		CEStr lsArg;
+		CmdArg lsArg;
 		LPCWSTR pszCmd = pszCmdLine;
-		while (0 == NextArg(&pszCmd, lsArg))
+		while ((pszCmd = NextArg(pszCmd, lsArg)))
 		{
 			if (lsArg.OneOfSwitches(L"-runlist",L"-cmdlist"))
 			{
@@ -530,7 +530,7 @@ bool CConEmuInside::TurnExplorerTipPane(wchar_t (&szAddMsg)[128])
 	{
 		// WinXP, Win2k3
 		nBtn = IDYES; // MsgBox(L"Tip pane is not found in Explorer window!\nThis pane is required for 'ConEmu Inside' mode.\nDo you want to show this pane?", MB_ICONQUESTION|MB_YESNO);
-		if (nBtn == IDYES)
+		// if (nBtn == IDYES)
 		{
 
 		#if 0

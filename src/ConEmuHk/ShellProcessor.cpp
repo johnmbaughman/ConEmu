@@ -132,11 +132,39 @@ void TestShellProcessor()
 //int CShellProc::mn_InShellExecuteEx = 0;
 int gnInShellExecuteEx = 0;
 
-extern struct HookModeFar gFarMode;
-
 bool  CShellProc::mb_StartingNewGuiChildTab = 0;
 DWORD CShellProc::mn_LastStartedPID = 0;
 PROCESS_INFORMATION CShellProc:: m_WaitDebugVsThread = {};
+
+
+namespace {
+void LogFarExecCommand(
+	enum CmdOnCreateType aCmd,
+	LPCWSTR asAction, LPCWSTR asFile, LPCWSTR asParam, LPCWSTR asDir,
+	DWORD* /*anShellFlags*/, DWORD* /*anCreateFlags*/, DWORD* /*anStartFlags*/,
+	DWORD* /*anShowCmd*/, HANDLE* /*lphStdIn*/, HANDLE* /*lphStdOut*/, HANDLE* /*lphStdErr*/)
+{
+	if (!gfnSrvLogString)
+		return;
+	wchar_t far_info[120];
+	msprintf(far_info, std::size(far_info),
+		L", Version=%u.%u.%u%s x%u, LongConsoleOutput=%s",
+		gFarMode.FarVer.dwVerMajor, gFarMode.FarVer.dwVerMinor, gFarMode.FarVer.dwBuild,
+		gFarMode.FarVer.Bis ? L"bis" : L"", gFarMode.FarVer.dwBits,
+		gFarMode.bLongConsoleOutput ? L"yes" : L"no");
+	CEStr log_str(
+		L"Far.exe: action=",
+		(aCmd == eShellExecute)
+			? ((asAction && *asAction) ? asAction : L"<shell>")
+			: L"<create>",
+		(asFile && *asFile) ? L", file=" : nullptr, asFile,
+		(asParam && *asParam) ? L", parm=" : nullptr, asParam,
+		(asDir && *asDir) ? L", dir=" : nullptr, asDir,
+		far_info);
+	gfnSrvLogString(log_str);
+}
+}
+
 
 CShellProc::CShellProc()
 {
@@ -684,8 +712,8 @@ BOOL CShellProc::ChangeExecuteParms(enum CmdOnCreateType aCmd, bool bConsoleMode
 						if (pszFileOnly)
 						{
 							LPCWSTR pszCopy = pszParam;
-							CEStr  szFirst;
-							if (NextArg(&pszCopy, szFirst) != 0)
+							CmdArg  szFirst;
+							if (!(pszCopy = NextArg(pszCopy, szFirst)))
 							{
 								_ASSERTE(FALSE && "NextArg failed?");
 							}
@@ -906,7 +934,7 @@ BOOL CShellProc::ChangeExecuteParms(enum CmdOnCreateType aCmd, bool bConsoleMode
 			LPCWSTR pszCmdLine = asParam;
 
 			ms_ExeTmp.Empty();
-			if (NextArg(&pszCmdLine, ms_ExeTmp) == 0)
+			if ((pszCmdLine = NextArg(pszCmdLine, ms_ExeTmp)))
 			{
 				LPCWSTR pszExt = PointToExt(ms_ExeTmp);
 				if (pszExt && (lstrcmpi(pszExt, L".exe") == 0 || lstrcmpi(pszExt, L".com") == 0))
@@ -996,9 +1024,15 @@ BOOL CShellProc::ChangeExecuteParms(enum CmdOnCreateType aCmd, bool bConsoleMode
 	nCchSize = (asFile ? lstrlen(asFile) : 0) + (asParam ? lstrlen(asParam) : 0) + 64;
 	if (lbUseDosBox)
 	{
-		// Может быть нужно экранирование кавычек или еще чего, зарезервируем буфер
-		// ну и сами параметры для DosBox
-		nCchSize = (nCchSize*2) + lstrlen(szDosBoxExe) + lstrlen(szDosBoxCfg) + 128 + MAX_PATH*2/*на cd и прочую фигню*/;
+		// Escaping of special symbols, dosbox arguments, etc.
+		nCchSize += (nCchSize)
+			+ lstrlen(szDosBoxExe) + lstrlen(szDosBoxCfg) + 128
+			+ (MAX_PATH * 2/*cd and others*/);
+	}
+
+	if (m_SrvMapping.nLogLevel)
+	{
+		nCchSize += 5; // + " /LOG"
 	}
 
 	if (!FileExists(pszOurExe))
@@ -1095,6 +1129,9 @@ BOOL CShellProc::ChangeExecuteParms(enum CmdOnCreateType aCmd, bool bConsoleMode
 
 	if (lbUseDosBox)
 		_wcscat_c((*psParam), nCchSize, L" /DOSBOX");
+
+	if (m_SrvMapping.nLogLevel)
+		_wcscat_c((*psParam), nCchSize, L" /LOG");
 
 	if (gFarMode.cbSize && gFarMode.bFarHookMode)
 	{
@@ -1284,8 +1321,8 @@ BOOL CShellProc::ChangeExecuteParms(enum CmdOnCreateType aCmd, bool bConsoleMode
 			if (!(asFile && *asFile) && asParam && *asParam)
 			{
 				LPCWSTR pszTest = asParam;
-				CEStr szTest;
-				if (NextArg(&pszTest, szTest) == 0)
+				CmdArg szTest;
+				if ((pszTest = NextArg(pszTest, szTest)))
 				{
 					pszTest = SkipNonPrintable(pszTest);
 					// Now - checks
@@ -1409,6 +1446,15 @@ int CShellProc::PrepareExecuteParms(
 	// Just in case of unexpected LastError changes
 	ScopedObject(CLastErrorGuard);
 
+	// Log with ConEmuCD when Far is working as Alternative Server
+	if (gFarMode.cbSize && gFarMode.bFarHookMode)
+	{
+		LogFarExecCommand(
+			aCmd, asAction, asFile, asParam, asDir,
+			anShellFlags, anCreateFlags, anStartFlags, anShowCmd,
+			lphStdIn, lphStdOut, lphStdErr);
+	}
+
 	CEStr szLnkExe, szLnkArg, szLnkDir;
 	if (asFile && (aCmd == eShellExecute))
 	{
@@ -1454,7 +1500,7 @@ int CShellProc::PrepareExecuteParms(
 		bool bAnsiConFound = false;
 		LPCWSTR pszDbg = psz;
 		ms_ExeTmp.Empty();
-		if (NextArg(&pszDbg, ms_ExeTmp) == 0)
+		if ((pszDbg = NextArg(pszDbg, ms_ExeTmp)))
 		{
 			CharUpperBuff(ms_ExeTmp.ms_Val, lstrlen(ms_ExeTmp));
 			if ((pszDbg = wcsstr(ms_ExeTmp, L"ANSI-LLW")) && (pszDbg[lstrlen(L"ANSI-LLW")] != L'\\'))
@@ -1465,7 +1511,7 @@ int CShellProc::PrepareExecuteParms(
 		#endif
 
 		ms_ExeTmp.Empty();
-		if (NextArg(&psz, ms_ExeTmp) != 0)
+		if (!NextArg(psz, ms_ExeTmp))
 		{
 			// AnsiCon exists in command line?
 			_ASSERTEX(bAnsiConFound==false);
@@ -1861,7 +1907,7 @@ int CShellProc::PrepareExecuteParms(
 		// Поехали
 		LPWSTR pszConsoles[MAX_CONSOLE_COUNT] = {};
 		size_t cchLen, cchAllLen = 0, iCount = 0;
-		while ((iCount < MAX_CONSOLE_COUNT) && (0 == NextArg(&asSource, szPart)))
+		while ((iCount < MAX_CONSOLE_COUNT) && (asSource = NextArg(asSource, szPart)))
 		{
 			if (lstrcmpi(PointToExt(szPart), L".lnk") == 0)
 			{
@@ -3169,7 +3215,7 @@ bool CShellProc::OnResumeDebugeeThreadCalled(HANDLE hThread, PROCESS_INFORMATION
 	{
 		nResumeRC = ResumeThread(hThread);
 		Sleep(50);
-		SuspendThread(hThread);
+		SuspendThread(hThread);  // -V720
 
 		// We need to ensure that process has been 'started'
 		// If not - CreateToolhelp32Snapshot will return ERROR_PARTIAL_COPY

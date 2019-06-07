@@ -39,6 +39,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "Hotkeys.h"
 #include "Macro.h"
 #include "Match.h"
+#include "../common/EnvVar.h"
 #include "../common/WFiles.h"
 #include "../common/WUser.h"
 
@@ -244,7 +245,7 @@ void UnitExpandTest()
 
 void UnitModuleTest()
 {
-	wchar_t* pszConEmuCD = lstrmerge(gpConEmu->ms_ConEmuBaseDir, WIN3264TEST(L"\\ConEmuCD.dll",L"\\ConEmuCD64.dll"));
+	CEStr pszConEmuCD(gpConEmu->ms_ConEmuBaseDir, L"\\", ConEmuCD_DLL_3264);
 	HMODULE hMod, hGetMod;
 	bool bTest;
 
@@ -361,13 +362,13 @@ void DebugCmdParserTests()
 	};
 
 	LPCWSTR pszSrc, pszCmp;
-	CEStr ls;
+	CmdArg ls;
 	int iCmp;
 	for (INT_PTR i = 0; i < countof(Tests); i++)
 	{
 		pszSrc = Tests[i].szTest;
 		pszCmp = Tests[i].szCmp;
-		while (0 == NextArg(&pszSrc, ls))
+		while ((pszSrc = NextArg(pszSrc, ls)))
 		{
 			DemangleArg(ls, ls.mb_Quoted);
 			iCmp = wcscmp(ls.ms_Val, pszCmp);
@@ -540,15 +541,97 @@ void DebugMapsTests()
 	_ASSERTE(circ.HasValue(116));
 }
 
+namespace {
+	struct MArrayDeleteTester
+	{
+		int value = 1;
+		static int dtor_called;
+		~MArrayDeleteTester() {
+			++dtor_called;
+		};
+	};
+
+	int MArrayDeleteTester::dtor_called = 0;
+};
+
 void DebugArrayTests()
 {
+	MArray<CEStr> sArr;
+	sArr.reserve(1);
+	_ASSERTE(sArr.size()==0 && sArr.capacity()==1);
+	sArr.push_back(CEStr(L"sample string"));
+	_ASSERTE(sArr.size()==1 && sArr.capacity()==1);
+	const wchar_t* psz = sArr[0].c_str();
+	_ASSERTE(psz && wcscmp(psz, L"sample string")==0);
+	sArr.swap(MArray<CEStr>());
+	_ASSERTE(sArr.size()==0 && sArr.capacity()==0);
+	sArr.push_back(CEStr(L"1"));
+	_ASSERTE(sArr.size()==1 && sArr.capacity()>=1 && sArr[0]==L"1");
+	sArr.push_back(L"3");
+	_ASSERTE(sArr.size()==2 && sArr.capacity()>=2 && sArr[0]==L"1" && sArr[1]==L"3");
+	const CEStr s2(L"2");
+	sArr.insert(1, s2);
+	_ASSERTE(sArr.size()==3 && sArr[0]==L"1" && sArr[1]==L"2" && sArr[2]==L"3");
+	sArr.erase(1);
+	_ASSERTE(sArr.size()==2 && sArr[0]==L"1" && sArr[1]==L"3");
+	sArr.push_back(L"4");
+	_ASSERTE(sArr.size()==3 && sArr[0]==L"1" && sArr[1]==L"3" && sArr[2]==L"4");
+	sArr.insert(1, CEStr(L"2"));
+	_ASSERTE(sArr.size()==4 && sArr[0]==L"1" && sArr[1]==L"2" && sArr[2]==L"3" && sArr[3]==L"4");
+	sArr.erase(1);
+	_ASSERTE(sArr.size()==3 && sArr[0]==L"1" && sArr[1]==L"3" && sArr[2]==L"4");
+
+	bool delete_called = false;
+	MArrayDeleteTester::dtor_called = 0;
+	MArray<MArrayDeleteTester> dArr;
+	dArr.push_back(MArrayDeleteTester{2});
+	_ASSERTE(MArrayDeleteTester::dtor_called==1 && dArr.size()==1 && dArr[0].value==2); // dtor of temp object
+	MArrayDeleteTester::dtor_called = 0;
+	dArr.clear();
+	_ASSERTE(MArrayDeleteTester::dtor_called==1); // dtor call from MArray
+	MArrayDeleteTester::dtor_called = 0;
+	dArr.resize(2);
+	_ASSERTE(MArrayDeleteTester::dtor_called==0 && dArr.size()==2 && dArr[0].value==1 && dArr[1].value==1);
+	dArr.resize(1);
+	_ASSERTE(MArrayDeleteTester::dtor_called==1 && dArr.size()==1 && dArr[0].value==1);
+
 	MArray<int> arr;
-	arr.push_back(1);
-	arr.push_back(2);
+	int i1 = 1;
+	arr.push_back(i1);
+	const int i2 = 2;
+	arr.push_back(i2);
 	arr.push_back(3);
 	arr.push_back(4);
 	arr.insert(2, 5);
-	_ASSERTE(arr[0]==1 && arr[1]==2 && arr[2]==5 && arr[3]==3 && arr[4]==4);
+	_ASSERTE(arr.size()==5 && arr[0]==1 && arr[1]==2 && arr[2]==5 && arr[3]==3 && arr[4]==4);
+	arr.sort([](const int& i1, const int& i2){ return (i1 < i2); });
+	_ASSERTE(arr.size()==5 && arr[0]==1 && arr[1]==2 && arr[2]==3 && arr[3]==4 && arr[4]==5);
+	arr.sort([](const int& i1, const int& i2){ return (i1 > i2); });
+	_ASSERTE(arr.size()==5 && arr[0]==5 && arr[1]==4 && arr[2]==3 && arr[3]==2 && arr[4]==1);
+
+	_ASSERTE(&arr[1] == &(arr[1]));
+
+	MArray<int> arr2;
+	arr2.push_back(1);
+	_ASSERTE(arr2.size() == 1 && arr2[0] == 1);
+	arr2.resize(999);
+	_ASSERTE(arr2.size() == 999 && arr2[0] == 1);
+	for (ssize_t i = 1; i < 999; ++i)
+		_ASSERTE(arr2[i] == 0);
+
+	arr2.swap(arr);
+	_ASSERTE(arr2.size()==5 && arr2[0]==5 && arr.size()==999 && arr[0]==1);
+
+	#if 0
+	// note: 'MArray<int> &MArray<int>::operator =(const MArray<int> &)': function was implicitly deleted because 'MArray<int>' has a user-defined move constructor
+	arr2 = arr; // cl error is expected
+	#endif
+
+	MArray<int> arr3;
+	for (int i = 1; i <= 5; ++i) arr3.push_back(i);
+	for (ssize_t i = arr3.size() - 1; i >= 0; --i) arr3.erase(i);
+	for (int i = 1; i <= 5; ++i) arr3.push_back(i);
+	for (ssize_t i = 0; i < arr3.size(); ++i) arr3.erase(i);
 }
 
 void DebugJsonTest()

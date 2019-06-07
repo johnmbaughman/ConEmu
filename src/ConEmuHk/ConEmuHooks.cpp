@@ -155,6 +155,7 @@ HookModeFar gFarMode = {sizeof(HookModeFar)};
 bool    gbIsFarProcess = false;
 InQueue gInQueue = {};
 HANDLE  ghConsoleCursorChanged = NULL;
+SrvLogString_t gfnSrvLogString = nullptr;
 /* ************ Globals for Far Hooks ************ */
 
 /* ************ Globals for cmd.exe/clink ************ */
@@ -448,6 +449,9 @@ bool InitHooksConsole()
 		HOOK_ITEM_BY_NAME(ScrollConsoleScreenBufferW, kernel32),
 		HOOK_ITEM_BY_NAME(WriteConsoleOutputCharacterA, kernel32),
 		HOOK_ITEM_BY_NAME(WriteConsoleOutputCharacterW, kernel32),
+		HOOK_ITEM_BY_NAME(FillConsoleOutputCharacterA, kernel32),
+		HOOK_ITEM_BY_NAME(FillConsoleOutputCharacterW, kernel32),
+		HOOK_ITEM_BY_NAME(FillConsoleOutputAttribute, kernel32),
 		/* Others console functions */
 		HOOK_ITEM_BY_NAME(GetNumberOfConsoleInputEvents, kernel32),
 		HOOK_ITEM_BY_NAME(FlushConsoleInputBuffer, kernel32),

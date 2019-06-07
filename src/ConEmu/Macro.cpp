@@ -31,27 +31,32 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define SHOWDEBUGSTR
 
 #include "Header.h"
+#include "../common/EnvVar.h"
 #include "../common/MGuiMacro.h"
 #include "../common/MStrEsc.h"
+#include "../common/ProcessSetEnv.h"
 #include "../common/WFiles.h"
 
-#include "RealConsole.h"
-#include "VirtualConsole.h"
-#include "Options.h"
-#include "OptionsClass.h"
-#include "TrayIcon.h"
-#include "ConEmu.h"
-#include "TabBar.h"
-#include "TrayIcon.h"
-#include "ConEmuPipe.h"
-#include "Macro.h"
-#include "VConGroup.h"
-#include "Menu.h"
+#include <set>
+
 #include "AboutDlg.h"
 #include "Attach.h"
-#include "SetDlgButtons.h"
+#include "ConEmu.h"
+#include "ConEmuPipe.h"
+#include "Macro.h"
+#include "Menu.h"
+#include "Options.h"
+#include "OptionsClass.h"
+#include "RealConsole.h"
 #include "SetCmdTask.h"
 #include "SetColorPalette.h"
+#include "SetDlgButtons.h"
+#include "SystemEnvironment.h"
+#include "TabBar.h"
+#include "TrayIcon.h"
+#include "TrayIcon.h"
+#include "VConGroup.h"
+#include "VirtualConsole.h"
 
 
 /* ********************************* */
@@ -153,6 +158,9 @@ namespace ConEmuMacro
 	LPWSTR Debug(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin);
 	// Detach
 	LPWSTR Detach(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin);
+	// Environment variables
+	LPWSTR EnvironmentReload(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin);
+	LPWSTR EnvironmentList(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin);
 	// Найти окно и активировать его. // int nWindowType/*Panels=1, Viewer=2, Editor=3*/, LPWSTR asName
 	LPWSTR FindEditor(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin);
 	LPWSTR FindFarWindow(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin);
@@ -210,7 +218,9 @@ namespace ConEmuMacro
 	LPWSTR SetDpi(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin);
 	// SetOption("<Name>",<Value>)
 	LPWSTR SetOption(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin);
-	// Диалог Settings
+	// SetParentHWND(<NewParentHWND>)
+	LPWSTR SetParentHWND(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin);
+	// Open Settings dialog
 	LPWSTR Settings(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin);
 	// Shell (ShellExecute)
 	LPWSTR Shell(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin);
@@ -277,6 +287,8 @@ namespace ConEmuMacro
 		{Copy, {L"Copy"}},
 		{Debug, {L"Debug"}, gmf_MainThread},
 		{Detach, {L"Detach"}, gmf_MainThread},
+		{EnvironmentReload, {L"EnvironmentReload", L"EnvReload"}, gmf_MainThread},
+		{EnvironmentList, {L"EnvironmentList", L"EnvList"}},
 		{FindEditor, {L"FindEditor"}},
 		{FindFarWindow, {L"FindFarWindow"}},
 		{FindViewer, {L"FindViewer"}},
@@ -306,6 +318,7 @@ namespace ConEmuMacro
 		{Select, {L"Select"}},
 		{SetDpi, {L"SetDpi"}, gmf_MainThread},
 		{SetOption, {L"SetOption"}, gmf_MainThread},
+		{SetParentHWND, {L"SetParentHWND"}, gmf_MainThread},
 		{Settings, {L"Settings"}, gmf_MainThread},
 		{Shell, {L"Shell", L"ShellExecute"}, gmf_MainThread},
 		{Sleep, {L"Sleep"}},
@@ -997,6 +1010,8 @@ void ConEmuMacro::UnitTests()
 	_ASSERTE(p && p->argc==1 && lstrcmp(p->argv[0].Str,L"def")==0);
 	SafeFree(p);
 
+	CEStr env_list(EnvironmentList(nullptr, nullptr, false));
+
 	gbUnitTest = false;
 }
 #endif
@@ -1210,10 +1225,17 @@ LPWSTR ConEmuMacro::GetNextInt(LPWSTR& rsArguments, GuiMacroArg& rnValue)
 	if (*pszTestEnd == L'-' || *pszTestEnd == L'+')
 		pszTestEnd++;
 	if (pszTestEnd[0] == L'0' && (pszTestEnd[1] == L'x' || pszTestEnd[1] == L'X'))
-		pszTestEnd+=2;
-	while (isDigit(*pszTestEnd))
-		pszTestEnd++;
+	{
+		pszTestEnd += 2;
+		while (isHexDigit(*pszTestEnd))
+			pszTestEnd++;
+	} else {
+		while (isDigit(*pszTestEnd))
+			pszTestEnd++;
+	}
 	#endif
+
+	// TODO: Support 64-bit integers?
 
 	// Hex value?
 	if (pszArg[0] == L'0' && (pszArg[1] == L'x' || pszArg[1] == L'X'))
@@ -1685,6 +1707,80 @@ LPWSTR ConEmuMacro::Context(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin
 	return lstrdup(L"");
 }
 
+LPWSTR ConEmuMacro::EnvironmentReload(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin)
+{
+	gpConEmu->ReloadEnvironmentVariables();
+	return lstrdup(L"OK");
+}
+
+namespace {
+void AppendExpandedValue(CEStrConcat& ss, const bool expandable, const wchar_t* data)
+{
+	if (expandable)
+	{
+		CEStr value(ExpandEnvStr(data));
+		if (!value.IsEmpty())
+		{
+			ss.Append(value.c_str(L""));
+			return;
+		}
+	}
+	ss.Append(data);
+}
+};
+
+LPWSTR ConEmuMacro::EnvironmentList(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin)
+{
+	CEStrConcat ss;
+
+	// Pairs `name=value` from registry
+	std::shared_ptr<SystemEnvironment> data_ptr = gpConEmu->GetEnvironmentVariables();
+	const auto& data = data_ptr->env_data;
+	for (const auto& key : data_ptr->GetKeys())
+	{
+		const auto& v = data.at(key);
+		ss.Append(v.name.c_str());
+		ss.Append(L"=");
+		AppendExpandedValue(ss, v.expandable, v.data.c_str());
+		ss.Append(L"\n");
+	}
+
+	// Pairs `name=value` from ConEmu settings
+	if (gpSet->psEnvironmentSet)
+	{
+		CProcessEnvCmd env;
+		env.AddLines(gpSet->psEnvironmentSet, true);
+
+		class Apply : public CStartEnvBase
+		{
+		private:
+			CEStrConcat& ss_;
+		public:
+			Apply(CEStrConcat& ss) : ss_(ss) {}
+			void Alias(LPCWSTR asName, LPCWSTR asValue) override {}
+			void ChCp(LPCWSTR asCP) override {}
+			void Echo(LPCWSTR asSwitches, LPCWSTR asText) override {}
+			void Title(LPCWSTR asTitle) override {}
+			void Type(LPCWSTR asSwitches, LPCWSTR asFile) override {}
+			void Set(LPCWSTR asName, LPCWSTR asValue) override
+			{
+				if (asName && *asName && asValue)
+				{
+					ss_.Append(asName);
+					ss_.Append(L"=");
+					AppendExpandedValue(ss_, true, asValue);
+					ss_.Append(L"\n");
+				}
+			}
+		};
+
+		Apply apply(ss);
+		env.Apply(&apply);
+	}
+
+	return ss.GetData().Detach();
+}
+
 // Найти окно и активировать его. // LPWSTR asName
 LPWSTR ConEmuMacro::FindEditor(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin)
 {
@@ -1796,10 +1892,10 @@ LPWSTR ConEmuMacro::WindowMaximize(GuiMacro* p, CRealConsole* apRCon, bool abFro
 	{
 	case 1:
 		// By width
-		gpConEmu->ChandeTileMode(cwc_TileWidth); break;
+		gpConEmu->ChangeTileMode(cwc_TileWidth); break;
 	case 2:
 		// By height
-		gpConEmu->ChandeTileMode(cwc_TileHeight); break;
+		gpConEmu->ChangeTileMode(cwc_TileHeight); break;
 	default:
 		gpConEmu->DoMaximizeRestore();
 	}
@@ -1904,7 +2000,7 @@ LPWSTR ConEmuMacro::WindowMode(GuiMacro* p, CRealConsole* apRCon, bool abFromPlu
 	case cwc_TileRight:
 	case cwc_TileHeight:
 	case cwc_TileWidth:
-		gpConEmu->ChandeTileMode(Cmd);
+		gpConEmu->ChangeTileMode(Cmd);
 		break;
 	case cwc_PrevMonitor:
 	case cwc_NextMonitor:
@@ -2406,8 +2502,9 @@ LPWSTR ConEmuMacro::Keys(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin)
 	if (!apRCon)
 		return lstrdup(L"RConRequired");
 
-	LPWSTR pszKey;
+	LPWSTR pszKey = NULL;
 	int iKeyNo = 0;
+	wchar_t szSeq[4];
 
 	while (p->GetStrArg(iKeyNo++, pszKey))
 	{
@@ -2423,7 +2520,7 @@ LPWSTR ConEmuMacro::Keys(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin)
 		// Parse modifiers
 		while (pszKey[0] && pszKey[1])
 		{
-			switch (*pszKey)
+			switch (pszKey[0])
 			{
 			case L'<':
 				bRight = false;
@@ -2447,8 +2544,6 @@ LPWSTR ConEmuMacro::Keys(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin)
 				// Post {pszKey + dwControlState} to console
 				goto DoPost;
 			}
-			if (!pszKey)
-				break;
 			pszKey++;
 		}
 
@@ -2466,7 +2561,6 @@ LPWSTR ConEmuMacro::Keys(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin)
 		}
 		if (VK || (iScanCode != -1))
 		{
-			wchar_t szSeq[4];
 			if (pszKey[1] != 0)
 				pszKey = NULL;
 
@@ -2858,7 +2952,7 @@ LPWSTR ConEmuMacro::Select(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin)
 		// ref gh-1299
 		if (!apRCon->isSelectionPresent())
 			return lstrdup(L"Selection was not started");
-		apRCon->DoSelectionStop();
+		apRCon->DoSelectionFinalize();
 		return lstrdup(L"OK");
 	}
 
@@ -2920,8 +3014,17 @@ LPWSTR ConEmuMacro::Select(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin)
 	}
 	else if (nType == 0)
 	{
-		if (nHomeEnd)
-			apRCon->ChangeSelectionByKey(((nHomeEnd < 0) ? VK_HOME : VK_END), false, true);
+		switch (nHomeEnd)
+		{
+		case -1:
+			apRCon->ChangeSelectionByKey(VK_HOME, false, true); break;
+		case +1:
+			apRCon->ChangeSelectionByKey(VK_END, false, true); break;
+		case -2:
+			apRCon->ChangeSelectionByKey(VK_LEFT, true, true); break;
+		case +2:
+			apRCon->ChangeSelectionByKey(VK_RIGHT, true, true); break;
+		}
 	}
 
 	return lstrdup(L"OK");
@@ -3165,6 +3268,25 @@ LPWSTR ConEmuMacro::SetOption(GuiMacro* p, CRealConsole* apRCon, bool abFromPlug
 	}
 
 	return pszResult ? pszResult : lstrdup(L"UnknownOption");
+}
+
+// SetParentHWND(<NewParentHWND>)
+LPWSTR ConEmuMacro::SetParentHWND(GuiMacro* p, CRealConsole* apRCon, bool abFromPlugin)
+{
+	if (!gpConEmu->isInside())
+		return lstrdup(L"InsideModeRequired");
+
+	HWND2 hNewParent{0};
+	if (p->IsIntArg(0))
+	{
+		int hwnd_int = 0;
+		p->GetIntArg(0, hwnd_int);
+		hNewParent.u = static_cast<DWORD>(hwnd_int);
+	}
+
+	// TODO: Call here smth. like gpConEmu->SetInsideParent((HWND)hNewParent);
+
+	return lstrdup(L"OK");
 }
 
 // Диалог Settings

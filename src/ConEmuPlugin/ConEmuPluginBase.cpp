@@ -52,6 +52,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "PluginBackground.h"
 #include "../common/ConEmuCheckEx.h"
 #include "../common/EmergencyShow.h"
+#include "../common/EnvVar.h"
 #include "../common/FarVersion.h"
 #include "../common/HkFunc.h"
 #include "../common/MFileMapping.h"
@@ -59,11 +60,11 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "../common/MSection.h"
 #include "../common/MSetter.h"
 #include "../common/MWow64Disable.h"
+#include "../common/SetEnvVar.h"
 #include "../common/WFiles.h"
 #include "../common/WConsoleEx.h"
 #include "../common/WModuleCheck.h"
 #include "../common/WThreads.h"
-#include "../common/SetEnvVar.h"
 #include "../ConEmuHk/ConEmuHooks.h"
 #include "../ConEmu/version.h"
 
@@ -1526,16 +1527,16 @@ bool CPluginBase::StartDebugger()
 		// Откроем дебаггер в новой вкладке ConEmu. При желании юзеру проще сделать Detach
 		// "/DEBUGPID=" обязательно должен быть первым аргументом
 
-		swprintf_c(szExe, L"\"%s\" /ATTACH /ROOT \"%s\" /DEBUGPID=%i /BW=%i /BH=%i /BZ=9999",
-		          szConEmuC, szConEmuC, dwSelfPID, w, h);
-		//swprintf_c(szExe, L"\"%s\" /ATTACH /GID=%u /GHWND=%08X /ROOT \"%s\" /DEBUGPID=%i /BW=%i /BH=%i /BZ=9999",
-		//          szConEmuC, nGuiPID, (DWORD)(DWORD_PTR)ghConEmuWndDC, szConEmuC, dwSelfPID, w, h);
+		swprintf_c(szExe, L"\"%s\" /ATTACH /ROOT \"%s\" /DEBUGPID=%i /BW=%i /BH=%i /BZ=%i",
+		          szConEmuC, szConEmuC, dwSelfPID, w, h, LONGOUTPUTHEIGHT_MAX);
+		//swprintf_c(szExe, L"\"%s\" /ATTACH /GID=%u /GHWND=%08X /ROOT \"%s\" /DEBUGPID=%i /BW=%i /BH=%i /BZ=%i",
+		//          szConEmuC, nGuiPID, (DWORD)(DWORD_PTR)ghConEmuWndDC, szConEmuC, dwSelfPID, w, h, LONGOUTPUTHEIGHT_MAX);
 	}
 	else
 	{
 		// Запустить дебаггер в новом видимом консольном окне
-		swprintf_c(szExe, L"\"%s\" /DEBUGPID=%i /BW=%i /BH=%i /BZ=9999",
-		          szConEmuC, dwSelfPID, w, h);
+		swprintf_c(szExe, L"\"%s\" /DEBUGPID=%i /BW=%i /BH=%i /BZ=%i",
+		          szConEmuC, dwSelfPID, w, h, LONGOUTPUTHEIGHT_MAX);
 	}
 
 	if (ghConEmuWndDC)
@@ -2740,7 +2741,7 @@ void CPluginBase::EmergencyShow()
 		return;
 
 	// If there is a ConEmuCD - just skip 'Plugin version'
-	HMODULE hSrv = GetModuleHandle(WIN3264TEST(L"ConEmuCD.dll",L"ConEmuCD64.dll"));
+	HMODULE hSrv = GetModuleHandle(ConEmuCD_DLL_3264);
 	if (hSrv)
 		return;
 
@@ -4614,7 +4615,7 @@ void CPluginBase::OnConsolePeekReadInput(bool abPeek)
 	if (nCurTID != nCurMainTID)
 	{
 		HANDLE hThread = OpenThread(THREAD_SUSPEND_RESUME, FALSE, nCurMainTID);
-		if (hThread) SuspendThread(hThread);
+		if (hThread) SuspendThread(hThread);  // -V720
 		_ASSERTE(nCurTID == nCurMainTID);
 		if (hThread) { ResumeThread(hThread); CloseHandle(hThread); }
 	}
@@ -5309,7 +5310,7 @@ BOOL /*WINAPI*/ CPluginBase::OnConsoleDetaching(HookCallbackArg* pArgs)
 {
 	if (ghMonitorThread)
 	{
-		SuspendThread(ghMonitorThread);
+		SuspendThread(ghMonitorThread);  // -V720
 		// ResumeThread выполняется в конце OnConsoleWasAttached
 	}
 

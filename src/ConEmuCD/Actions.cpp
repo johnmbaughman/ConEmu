@@ -39,6 +39,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "../common/CmdLine.h"
 #include "../common/ConEmuCheck.h"
 #include "../common/CEStr.h"
+#include "../common/EnvVar.h"
 #include "../common/MModule.h"
 #include "../common/MProcess.h"
 #include "../common/MStrDup.h"
@@ -386,7 +387,7 @@ int DoExportEnv(LPCWSTR asCmdArg, ConEmuExecAction eExecAction, bool bSilent /*=
 	HANDLE h;
 	size_t cchMaxEnvLen = 0;
 	wchar_t* pszBuffer;
-	CEStr szTmpPart;
+	CmdArg szTmpPart;
 	LPCWSTR pszTmpPartStart;
 	LPCWSTR pszCmdArg;
 	wchar_t szInfo[200];
@@ -477,7 +478,7 @@ int DoExportEnv(LPCWSTR asCmdArg, ConEmuExecAction eExecAction, bool bSilent /*=
 			pszSrc = pszNext;
 		}
 	}
-	else while (0==NextArg(&pszCmdArg, szTmpPart, &pszTmpPartStart))
+	else while ((pszCmdArg = NextArg(pszCmdArg, szTmpPart, &pszTmpPartStart)))
 	{
 		if ((pszTmpPartStart > asCmdArg) && (*(pszTmpPartStart-1) != L'"'))
 		{
@@ -492,8 +493,8 @@ int DoExportEnv(LPCWSTR asCmdArg, ConEmuExecAction eExecAction, bool bSilent /*=
 			}
 		}
 		LPCWSTR pszPart = szTmpPart;
-		CEStr szTest;
-		while (0==NextArg(&pszPart, szTest))
+		CmdArg szTest;
+		while ((pszPart = NextArg(pszPart, szTest)))
 		{
 			if (!*szTest || *szTest == L'*')
 			{
@@ -597,9 +598,7 @@ int DoExportEnv(LPCWSTR asCmdArg, ConEmuExecAction eExecAction, bool bSilent /*=
 	}
 
 	// Allocate memory for process tree
-	//pList = (ProcInfo*)malloc(cchMax*sizeof(*pList));
-	//if (!pList)
-	if (!List.alloc(4096))
+	if (!List.reserve(4096))
 	{
 		if (!bSilent)
 			_printf(ExpFailedPref ", List allocation failed\n");
@@ -768,9 +767,9 @@ int DoParseArgs(LPCWSTR asCmdLine)
 	LPWSTR* ppszShl = CommandLineToArgvW(asCmdLine, &iShellCount);
 
 	int i = 0;
-	CEStr szArg;
+	CmdArg szArg;
 	_printf("ConEmu `NextArg` splitter\n");
-	while (NextArg(&asCmdLine, szArg) == 0)
+	while ((asCmdLine = NextArg(asCmdLine, szArg)))
 	{
 		if (szArg.mb_Quoted)
 			DemangleArg(szArg, true);
@@ -805,7 +804,7 @@ int DoOutput(ConEmuExecAction eExecAction, LPCWSTR asCmdArg)
 	bool     bAsciiPrint = false;
 	bool     bExpandEnvVar = false;
 	bool     bStreamBy1 = false;
-	CEStr    szArg;
+	CmdArg   szArg;
 	HANDLE   hFile = NULL;
 	DWORD    DefaultCP = 0;
 
@@ -816,7 +815,7 @@ int DoOutput(ConEmuExecAction eExecAction, LPCWSTR asCmdArg)
 	_ASSERTE(asCmdArg && (*asCmdArg != L' '));
 	asCmdArg = SkipNonPrintable(asCmdArg);
 
-	while ((*asCmdArg == L'-' || *asCmdArg == L'/') && (NextArg(&asCmdArg, szArg) == 0))
+	while ((*asCmdArg == L'-' || *asCmdArg == L'/') && (asCmdArg = NextArg(asCmdArg, szArg)))
 	{
 		// Make uniform
 		if (szArg.ms_Val[0] == L'/')
@@ -857,7 +856,7 @@ int DoOutput(ConEmuExecAction eExecAction, LPCWSTR asCmdArg)
 
 	if (eExecAction == ea_OutType)
 	{
-		if (NextArg(&asCmdArg, szArg) == 0)
+		if ((asCmdArg = NextArg(asCmdArg, szArg)))
 		{
 			_ASSERTE(!bAsciiPrint || !DefaultCP);
 			DWORD nSize = 0, nErrCode = 0;
@@ -878,12 +877,13 @@ int DoOutput(ConEmuExecAction eExecAction, LPCWSTR asCmdArg)
 	{
 		_ASSERTE(szTemp.ms_Val == NULL);
 
-		while (NextArg(&asCmdArg, szArg) == 0)
+		while ((asCmdArg = NextArg(asCmdArg, szArg)))
 		{
 			LPCWSTR pszAdd = szArg.ms_Val;
 			_ASSERTE(pszAdd!=NULL);
 
-			CEStr lsExpand, lsDemangle;
+			CEStr lsExpand;
+			CmdArg lsDemangle;
 
 			// Expand environment variables
 			// TODO: Expand !Variables! too
@@ -1062,9 +1062,9 @@ wrap:
 int DoStoreCWD(LPCWSTR asCmdArg)
 {
 	int iRc = 1;
-	CEStr szDir;
+	CmdArg szDir;
 
-	if ((NextArg(&asCmdArg, szDir) != 0) || szDir.IsEmpty())
+	if (!NextArg(asCmdArg, szDir) || szDir.IsEmpty())
 	{
 		if (GetDirectory(szDir) == NULL)
 			goto wrap;

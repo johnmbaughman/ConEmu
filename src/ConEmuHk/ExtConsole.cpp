@@ -1123,7 +1123,7 @@ BOOL ExtWriteText(ExtWriteTextParm* Info)
 	#endif
 
 	bool bAutoLfNl = ((Info->Flags & ewtf_NoLfNl) == 0);
-	bool bNonAutoLfNl = false;
+	bool bIntCursorOp = false;
 
 	const wchar_t *pCur = pFrom;
 	SHORT x = csbi.dwCursorPosition.X, y = csbi.dwCursorPosition.Y; // 0-based
@@ -1152,6 +1152,7 @@ BOOL ExtWriteText(ExtWriteTextParm* Info)
 		bool BSRN = false;
 		bool bForceDumpScroll = false;
 		bool bSkipBELL = false;
+		bool bAdvanceCur = false;
 
 		WARNING("Refactoring required: use an object to cache symbols and write them on request");
 
@@ -1159,38 +1160,35 @@ BOOL ExtWriteText(ExtWriteTextParm* Info)
 		switch (*pCur)
 		{
 		case L'\t':
-			x2 = ((x2 + 7) >> 3) << 3;
-			// like normal char...
-			if (x2 >= WrapAtCol)
-			{
-				ForceDumpX = std::min(x2, WrapAtCol)-1;
-			}
+			if (x2>x)
+				ForceDumpX = x2;
+			x2 = ((x2 + 8) >> 3) << 3;
+			BSRN = true; bIntCursorOp = true;
 			break;
 		case L'\r':
 			if (x2 > 0)
 				ForceDumpX = x2-1;
 			x2 = 0;
-			bNonAutoLfNl = false;
+			bIntCursorOp = false;
 			BSRN = true;
 			// "\r\n"? Do not break in two physical writes
 			if (((pCur+1) < pEnd) && (*(pCur+1) == L'\n'))
-			{
-				pCur++; y2++;
-				_ASSERTE(bWrap);
-			}
-			break;
+				pCur++; // continue to L'\n' section
+			else
+				break;
 		case L'\n':
 			if (x2 > 0)
 				ForceDumpX = x2-1;
 			if (bAutoLfNl)
 				x2 = 0;
 			else if (x2)
-				bNonAutoLfNl = true;
+				bIntCursorOp = true;
 			y2++;
 			if (y2 >= ScrollBottom)
 				bForceDumpScroll = true;
 			_ASSERTE(bWrap);
 			BSRN = true;
+			CEAnsi::StorePromptReset();
 			break;
 		case 7:
 			//Beep (no spacing)
@@ -1198,20 +1196,23 @@ BOOL ExtWriteText(ExtWriteTextParm* Info)
 			{
 				LogBeepSkip(L"--- Skipped ExtWriteText(7)\n");
 				bForceDumpScroll = bSkipBELL = true;
-				pCur--;
+				bAdvanceCur = true; --pCur;
 			}
 			else
 			{
 				LogBeepSkip(L"--- ExtWriteText(7)\n");
 			}
 			break;
-		case 8:
+		case 8: // L'\b'
 			//BS
 			if (x2>x)
 				ForceDumpX = x2;
 			if (x2>0)
 				x2--;
 			BSRN = true;
+			bIntCursorOp = true;
+			// Don't pass '\b' to WriteText (problem in Win10 build)
+			bAdvanceCur = true; --pCur;
 			break;
 		default:
 			// Просто буква.
@@ -1235,9 +1236,13 @@ BOOL ExtWriteText(ExtWriteTextParm* Info)
 						(pTrueColorStart && (nLinePosition >= 0)) ? (pTrueColorStart + nLinePosition) : NULL,
 						(pTrueColorEnd), AIColor, csbi, (WriteConsoleW_t)Info->Private);
 
+			if (bAdvanceCur)
+			{
+				++pCur;
+				bAdvanceCur = false;
+			}
 			if (bSkipBELL)
 			{
-				pCur++;
 				// User may disable flashing in ConEmu settings
 				GuiFlashWindow(eFlashBeep, ghConWnd, FALSE, FLASHW_ALL, 1, 0);
 			}
@@ -1248,6 +1253,12 @@ BOOL ExtWriteText(ExtWriteTextParm* Info)
 		else
 		{
 			_ASSERTE(!bSkipBELL);
+
+			if (bAdvanceCur)
+			{
+				++pCur;
+				bAdvanceCur = false;
+			}
 		}
 
 		// После BS - сменить "начальную" координату
@@ -1292,7 +1303,7 @@ BOOL ExtWriteText(ExtWriteTextParm* Info)
 
 					SetConsoleCursorPosition(Info->ConsoleOutput, crScrollCursor);
 
-					bNonAutoLfNl = false; // already processed
+					bIntCursorOp = false; // already processed
 				}
 				else
 				{
@@ -1308,12 +1319,15 @@ BOOL ExtWriteText(ExtWriteTextParm* Info)
 			y = y2;
 		}
 
-		// xterm-compatible '\n': just move cursor downward, don't do CR
-		if (bNonAutoLfNl)
+		// xterm-compatible
+		// '\n': just move cursor downward, don't do CR
+		// '\t': move cursor to x8 position, don't erase any cells
+		// '\b': move cursor backward by one cell, don't erase cell, don't move cursor upward
+		if (bIntCursorOp)
 		{
 			_ASSERTE(x2>0);
-			_ASSERTE(pCur < pEnd && *pCur == L'\n' && (pFrom == pCur || pFrom == pCur+1));
-			bNonAutoLfNl = false;
+			_ASSERTE(pCur < pEnd && (*pCur == L'\n' || *pCur == L'\t' || *pCur == L'\b') && (pFrom == pCur || pFrom == pCur+1));
+			bIntCursorOp = false;
 			crScrollCursor.X = x2;
 			crScrollCursor.Y = y2;
 			SetConsoleCursorPosition(Info->ConsoleOutput, crScrollCursor);
@@ -1323,7 +1337,7 @@ BOOL ExtWriteText(ExtWriteTextParm* Info)
 
 	if (pCur > pFrom)
 	{
-		_ASSERTE(!bNonAutoLfNl && "bNonAutoLfNl must be processed already");
+		_ASSERTE(bIntCursorOp==false && "must be processed already");
 
 		// Printing (NOT including pCur) using extended attributes
 		SHORT ForceDumpX = (x2 > x) ? (std::min(x2, WrapAtCol)-1) : -1;
@@ -1464,14 +1478,16 @@ BOOL ExtFillOutput(ExtFillOutputParm* Info)
 
 		if (!(Info->Flags & efof_ResetExt))
 		{
-			b = FillConsoleOutputAttribute(h, n, Info->Count, Info->Coord, &nWritten);
+			ORIGINAL_KRNL(FillConsoleOutputAttribute);
+			b = F(FillConsoleOutputAttribute)(h, n, Info->Count, Info->Coord, &nWritten);
 			lbRc &= b;
 		}
 	}
 
 	if (Info->Flags & efof_Character)
 	{
-		b = FillConsoleOutputCharacter(h, Info->FillChar ? Info->FillChar : L' ', Info->Count, Info->Coord, &nWritten);
+		ORIGINAL_KRNL(FillConsoleOutputCharacterW);
+		b = F(FillConsoleOutputCharacterW)(h, Info->FillChar ? Info->FillChar : L' ', Info->Count, Info->Coord, &nWritten);
 		lbRc &= b;
 	}
 
@@ -1822,20 +1838,23 @@ BOOL ExtScrollScreen(ExtScrollScreenParm* Info)
 			}
 			else
 			{
-				_ASSERTEX(nRows > 0);
+				//_ASSERTEX(nRows > 0); // may occur when scroll region does not start from screen top and we erase all lines
 			}
 		}
 
 		if (!(Info->Flags & essf_ExtOnly))
 		{
-			SMALL_RECT rcSrc = MakeSmallRect(0, SrcLineTop, csbi.dwSize.X-1, SrcLineBottom);
-			COORD crDst = MakeCoord(0, SrcLineTop + nDir/*<0*/);
-			AnnotationInfo t = {};
 			CHAR_INFO cFill = {{Info->FillChar}};
-			ExtPrepareColor(Info->FillAttr, t, cFill.Attributes);
 
-			if (rcSrc.Bottom >= rcSrc.Top)
+			if (SrcLineBottom >= SrcLineTop)
+			{
+				SMALL_RECT rcSrc = MakeSmallRect(0, SrcLineTop, csbi.dwSize.X-1, SrcLineBottom);
+				COORD crDst = MakeCoord(0, SrcLineTop + nDir/*<0*/);
 				F(ScrollConsoleScreenBufferW)(Info->ConsoleOutput, &rcSrc, NULL, crDst, &cFill);
+			}
+			//else ?
+			//AnnotationInfo t = {};
+			//ExtPrepareColor(Info->FillAttr, t, cFill.Attributes);
 
 			if (nDir < 0)
 			{

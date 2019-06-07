@@ -52,7 +52,8 @@ bool FileSearchInDir(LPCWSTR asFilePath, CEStr& rsFound);
 bool IsVsNetHostExe(LPCWSTR asFilePatName);
 bool IsGDB(LPCWSTR asFilePatName);
 
-typedef bool (*SearchAppPaths_t)(LPCWSTR asFilePath, CEStr& rsFound, bool abSetPath, CEStr* rpsPathRestore /*= NULL*/);
+class CEnvRestorer;
+typedef bool (*SearchAppPaths_t)(LPCWSTR asFilePath, CEStr& rsFound, bool abSetPath, CEnvRestorer* rpsPathRestore /*= NULL*/);
 extern SearchAppPaths_t gfnSearchAppPaths /*= NULL*/;
 bool FileExistsSearch(LPCWSTR asFilePath, CEStr& rsFound, bool abSetPath = true, bool abRegSearch = true);
 
@@ -72,6 +73,7 @@ bool IsWinXP();
 bool IsWinXPSP1();
 bool IsWin6();
 bool IsWin7();
+bool IsWin7Eql();
 bool IsWin8();
 bool IsWin8_1();
 bool IsWin10();
@@ -80,9 +82,7 @@ bool IsWine();
 bool IsWinPE();
 
 wchar_t* ExpandMacroValues(LPCWSTR pszFormat, LPCWSTR* pszValues, size_t nValCount);
-wchar_t* ExpandEnvStr(LPCWSTR pszCommand);
 
-wchar_t* GetEnvVar(LPCWSTR VarName);
 wchar_t* GetComspec(const ConEmuComspec* pOpt);
 LPCWSTR GetComspecFromEnvVar(wchar_t* pszComspec, DWORD cchMax, ComSpecBits Bits = csb_SameOS);
 

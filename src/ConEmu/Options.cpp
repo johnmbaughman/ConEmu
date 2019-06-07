@@ -40,6 +40,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifdef _DEBUG
 #include <TlHelp32.h>
 #endif
+#include "../common/clink.h"
 #include "../common/CEHandle.h"
 #include "../common/MFileLogEx.h"
 #include "../common/Monitors.h"
@@ -455,16 +456,22 @@ void Settings::InitSettings()
 		}
 	}
 
+	AutoReloadEnvironment = true;
 	psEnvironmentSet = lstrdup(
 		L"set PATH=%ConEmuBaseDir%\\Scripts;%PATH%\r\n"
 		L"\r\n"
-		L"rem set LANG=ru_RU.utf8\r\n"
-		L"rem set LANG=ru_RU.CP1251\r\n"
+		L"# set ConEmuPromptNames=NO\r\n" // created after gh-1570
+		L"# set ConEmuPromptNL=NO\r\n"
+		L"# set ConEmuSudoSplit=NO\r\n"
+		L"# set ConEmuSudoConfirm=NO\r\n"
 		L"\r\n"
-		L"rem alias cdc=cd /d \"%ConEmuDir%\"\r\n"
-		L"rem alias cd~=cd /d \"%UserProfile%\"\r\n"
-		L"rem alias gl=git-log\r\n"
-		L"rem alias glb=git-log --branches --date-order\r\n"
+		L"# set LANG=ru_RU.utf8\r\n"
+		L"# set LANG=ru_RU.CP1251\r\n"
+		L"\r\n"
+		L"# alias cdc=cd /d \"%ConEmuDir%\"\r\n"
+		L"# alias cd~=cd /d \"%UserProfile%\"\r\n"
+		L"# alias gl=git-log\r\n"
+		L"# alias glb=git-log --branches --date-order\r\n"
 		);
 
 	bool bIsDbcs = IsWinDBCS();
@@ -511,8 +518,8 @@ void Settings::InitSettings()
 
 	isCompressLongStrings = true;
 
-	isTryToCenter = false;
-	nCenterConsolePad = 0;
+	isTryToCenter = true;
+	nCenterConsolePad = 4;
 	isAlwaysShowScrollbar = 2;
 	nScrollBarAppearDelay = 100;
 	nScrollBarDisappearDelay = 1000;
@@ -701,6 +708,7 @@ void Settings::InitSettings()
 	isAnsiExec = ansi_CmdOnly;
 	psAnsiAllowed = lstrdup(L"cmd -cur_console:R /cGitShowBranch.cmd\r\n");
 	isAnsiLog = false;
+	isAnsiLogCodes = false;
 	pszAnsiLog = lstrdup(CEANSILOGFOLDER);
 	isKillSshAgent = true;
 	isProcessNewConArg = true;
@@ -1571,20 +1579,26 @@ void Settings::LoadPalettes(SettingsBase* reg)
 		lbDelete = true;
 	}
 
-
+	FreePalettes();
 
 	BOOL lbOpened = FALSE;
 	CEStr szBaseKey(gpSetCls->GetConfigPath(), L"\\Colors");
 
 	lbOpened = reg->OpenKey(szBaseKey, KEY_READ);
-	if (lbOpened)
+	if (!lbOpened)
 	{
-		FreePalettes();
+		// Predefined
+		CreatePredefinedPalettes(0);
+		_ASSERTE(Palettes!=NULL);
+		// Was initialize with "Default palettes"
+		_ASSERTE(PaletteCount == (int)countof(DefColors));
+	}
+	else
+	{
 
 		int UserCount = 0;
 		reg->Load(L"Count", UserCount);
 		reg->CloseKey();
-
 
 		// Predefined
 		CreatePredefinedPalettes(UserCount);
@@ -1623,10 +1637,10 @@ void Settings::LoadPalettes(SettingsBase* reg)
 				reg->CloseKey();
 			}
 		}
-
-		// sort
-		SortPalettes();
 	}
+
+	// sort
+	SortPalettes();
 
 	if (lbDelete)
 		delete reg;
@@ -1931,6 +1945,9 @@ int Settings::PaletteSetActive(LPCWSTR asName)
 		AppStd.nBackColorIdx = pPal->nBackColorIdx;
 		AppStd.nPopTextColorIdx = pPal->nPopTextColorIdx;
 		AppStd.nPopBackColorIdx = pPal->nPopBackColorIdx;
+
+		mb_FadeInitialized = false;
+		GetColors(-1, true);
 	}
 
 	return nPalIdx;
@@ -2373,8 +2390,7 @@ void Settings::LoadSettings(bool& rbNeedCreateVanilla, const SettingsStorage* ap
 
 		if (gpConEmu->mp_Inside
 			&& ((gpConEmu->mp_Inside->mh_InsideParentWND == NULL)
-				|| (gpConEmu->mp_Inside->mh_InsideParentWND
-					&& (gpConEmu->mp_Inside->mh_InsideParentWND != INSIDE_PARENT_NOT_FOUND)
+				|| ((gpConEmu->mp_Inside->mh_InsideParentWND != INSIDE_PARENT_NOT_FOUND)
 					&& !IsWindow(gpConEmu->mp_Inside->mh_InsideParentWND))))
 		{
 			SafeDelete(gpConEmu->mp_Inside);
@@ -2528,6 +2544,7 @@ void Settings::LoadSettings(bool& rbNeedCreateVanilla, const SettingsStorage* ap
 		this->LoadMSZ(reg, L"AnsiAllowedCommands", psAnsiAllowed, L"\r\n", true);
 
 		reg->Load(L"AnsiLog", isAnsiLog);
+		reg->Load(L"AnsiLogCodes", isAnsiLogCodes);
 		reg->Load(L"AnsiLogPath", &pszAnsiLog);
 		reg->Load(L"KillSshAgent", isKillSshAgent);
 		reg->Load(L"ProcessNewConArg", isProcessNewConArg);
@@ -2703,6 +2720,7 @@ void Settings::LoadSettings(bool& rbNeedCreateVanilla, const SettingsStorage* ap
 		//FindComspec(&ComSpec);
 		//Update Comspec(&ComSpec); --> CSettings::SettingsLoaded
 
+		reg->Load(L"AutoReloadEnvironment", AutoReloadEnvironment);
 		this->LoadMSZ(reg, L"EnvironmentSet", psEnvironmentSet, L"\r\n", true);
 
 		reg->Load(L"CTS.Intelligent", isCTSIntelligent);
@@ -2734,6 +2752,7 @@ void Settings::LoadSettings(bool& rbNeedCreateVanilla, const SettingsStorage* ap
 		reg->Load(L"CTS.ColorIndex", isCTSColorIndex); if (CONFORECOLOR(isCTSColorIndex) == CONBACKCOLOR(isCTSColorIndex)) isCTSColorIndex = DefaultSelectionConsoleColor;
 
 		reg->Load(L"ClipboardConfirmEnter", isPasteConfirmEnter);
+		reg->Load(L"AutoTrimSingleLine", isAutoTrimSingleLine);
 		reg->Load(L"ClipboardConfirmLonger", nPasteConfirmLonger);
 
 		reg->Load(L"FarGotoEditorOpt", isFarGotoEditor);
@@ -3642,6 +3661,7 @@ BOOL Settings::SaveSettings(BOOL abSilent /*= FALSE*/, const SettingsStorage* ap
 		this->SaveMSZ(reg, L"AnsiAllowedCommands", psAnsiAllowed, L"\r\n", false);
 
 		reg->Save(L"AnsiLog", isAnsiLog);
+		reg->Save(L"AnsiLogCodes", isAnsiLogCodes);
 		reg->Save(L"AnsiLogPath", pszAnsiLog);
 		reg->Save(L"KillSshAgent", isKillSshAgent);
 		reg->Save(L"ProcessNewConArg", isProcessNewConArg);
@@ -3766,6 +3786,7 @@ BOOL Settings::SaveSettings(BOOL abSilent /*= FALSE*/, const SettingsStorage* ap
 		reg->Save(L"ComSpec.EnvAddExePath", _bool((ComSpec.AddConEmu2Path & CEAP_AddConEmuExeDir) == CEAP_AddConEmuExeDir));
 		reg->Save(L"ComSpec.UncPaths", _bool(ComSpec.isAllowUncPaths));
 		reg->Save(L"ComSpec.Path", ComSpec.ComspecExplicit);
+		reg->Save(L"AutoReloadEnvironment", AutoReloadEnvironment);
 		this->SaveMSZ(reg, L"EnvironmentSet", psEnvironmentSet, L"\r\n", false);
 		reg->Save(L"CTS.Intelligent", isCTSIntelligent);
 		{
@@ -3789,6 +3810,7 @@ BOOL Settings::SaveSettings(BOOL abSilent /*= FALSE*/, const SettingsStorage* ap
 		reg->Save(L"CTS.ColorIndex", isCTSColorIndex);
 
 		reg->Save(L"ClipboardConfirmEnter", isPasteConfirmEnter);
+		reg->Save(L"AutoTrimSingleLine", isAutoTrimSingleLine);
 		reg->Save(L"ClipboardConfirmLonger", nPasteConfirmLonger);
 
 		reg->Save(L"FarGotoEditorOpt", isFarGotoEditor);
@@ -3995,7 +4017,7 @@ int Settings::StatusBarHeight()
 }
 
 
-DWORD Settings::isUseClink(bool abCheckVersion /*= false*/)
+DWORD Settings::isUseClink()
 {
 	if (!mb_UseClink)
 		return 0;
@@ -4003,47 +4025,45 @@ DWORD Settings::isUseClink(bool abCheckVersion /*= false*/)
 	if (gpConEmu->IsResetBasicSettings())
 		return 0;
 
-	wchar_t szClink32[MAX_PATH+30], szClink64[MAX_PATH+30];
-
-	wcscpy_c(szClink32, gpConEmu->ms_ConEmuBaseDir);
-	wcscat_c(szClink32, L"\\clink\\clink_dll_x86.dll");
-	if (!FileExists(szClink32))
-		szClink32[0] = 0;
-
-	#ifdef _WIN64
-	wcscpy_c(szClink64, gpConEmu->ms_ConEmuBaseDir);
-	wcscat_c(szClink64, L"\\clink\\clink_dll_x64.dll");
-	if (!FileExists(szClink64))
-		szClink64[0] = 0;
-	#else
-		szClink64[0] = 0;
-	#endif
-
-	if (!szClink32[0] && !szClink64[0])
+	LPCWSTR clink_found_path = NULL;
+	wchar_t szClink32[MAX_PATH+30] = L"", szClink64[MAX_PATH+30] = L"";
+	const wchar_t* clink_dll_32[] = {CLINK_DLL_NAME_x32_v1, CLINK_DLL_NAME_x32_v0};
+	const wchar_t* clink_dll_64[] = {CLINK_DLL_NAME_x64_v1, CLINK_DLL_NAME_x64_v0};
+	const wchar_t clink_dir[] = L"\\clink\\";
+	for (size_t i = 0; i < std::size(clink_dll_32) && !clink_found_path; ++i)
 	{
-		return 0;
+		wcscpy_c(szClink32, gpConEmu->ms_ConEmuBaseDir);
+		wcscat_c(szClink32, clink_dir);
+		wcscat_c(szClink32, clink_dll_32[i]);
+		if (!FileExists(szClink32))
+			continue;
+
+		if (IsWindows64())
+		{
+			wcscpy_c(szClink64, gpConEmu->ms_ConEmuBaseDir);
+			wcscat_c(szClink64, clink_dir);
+			wcscat_c(szClink64, clink_dll_64[i]);
+			if (!FileExists(szClink64))
+				continue;
+		}
+
+		clink_found_path = WIN3264TEST(szClink32, szClink64);
 	}
 
 	static int nVersionChecked = 0;
+
+	if (!clink_found_path)
+	{
+		nVersionChecked = 0;
+		return 0;
+	}
+
 	static VS_FIXEDFILEINFO vi = {};
 
 	if (nVersionChecked == 0)
 	{
-		//DWORD nErrCode;
-		//HMODULE hLib = LoadLibraryEx(WIN3264TEST(szClink32,szClink64), NULL, LOAD_LIBRARY_AS_DATAFILE|LOAD_LIBRARY_AS_IMAGE_RESOURCE);
-		//if (!hLib)
-		//{
-		//	nVersionChecked = -1;
-		//	nErrCode = GetLastError();
-		//	DisplayLastError(L"Failed to load clink library as DataFile", nErrCode);
-		//	return false;
-		//}
-		//FreeLibrary(hLib);
-
-		LPCTSTR pszPath = WIN3264TEST(szClink32,szClink64[0] ? szClink64 : szClink32);
-
 		DWORD dwRsrvd = 0;
-		DWORD dwSize = GetFileVersionInfoSize(pszPath, &dwRsrvd);
+		DWORD dwSize = GetFileVersionInfoSize(clink_found_path, &dwRsrvd);
 
 		if (dwSize == 0)
 		{
@@ -4056,12 +4076,12 @@ DWORD Settings::isUseClink(bool abCheckVersion /*= false*/)
 			if (pVerData)
 			{
 				VS_FIXEDFILEINFO *lvs = NULL;
-				UINT nLen = sizeof(lvs);
 
-				if (GetFileVersionInfo(pszPath, 0, dwSize, pVerData))
+				if (GetFileVersionInfo(clink_found_path, 0, dwSize, pVerData))
 				{
 					wchar_t szSlash[3]; lstrcpyW(szSlash, L"\\");
 
+					UINT nLen = sizeof(void**);
 					if (VerQueryValue((void*)pVerData, szSlash, (void**)&lvs, &nLen))
 					{
 						vi = *lvs;
@@ -4075,7 +4095,7 @@ DWORD Settings::isUseClink(bool abCheckVersion /*= false*/)
 	}
 
 	if (nVersionChecked != 1 && nVersionChecked != 2)
-		return false;
+		return 0;
 	return (DWORD)nVersionChecked;
 }
 
@@ -5234,8 +5254,8 @@ bool Settings::CmdTaskGetDefaultShell(RConStartArgsEx& args, CEStr& lsTitle)
 			return false;
 		}
 
-		CEStr lsExe; LPCWSTR pszTemp = args.pszSpecialCmd;
-		if (0 == NextArg(&pszTemp, lsExe))
+		CmdArg lsExe; LPCWSTR pszTemp = args.pszSpecialCmd;
+		if ((pszTemp = NextArg(pszTemp, lsExe)))
 			lsTitle.Set(PointToName(lsExe));
 		if (lsTitle.IsEmpty())
 			lsTitle.Set(L"cmd.exe");
@@ -5639,7 +5659,7 @@ wchar_t* Settings::MultiLine2MSZ(const wchar_t* apszLines, DWORD* pcbSize/*in by
 		{
 			wchar_t* psz = pszDst;
 			LPCWSTR pszSrc = apszLines;
-			while (0 == NextLine(&pszSrc, lsLine, NLF_NONE))
+			while ((pszSrc = NextLine(pszSrc, lsLine, NLF_NONE)))
 			{
 				// We can't store empty lines in the middle of MSZZ value
 				// That is a registry limitation

@@ -28,6 +28,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #define HIDE_USE_EXCEPTION_INFO
 #include "Header.h"
+#include "../common/EnvVar.h"
 #include "../common/WFiles.h"
 #include <lm.h>
 #pragma warning(disable: 4091)
@@ -622,7 +623,7 @@ INT_PTR CRecreateDlg::OnButtonClicked(HWND hDlg, UINT messg, WPARAM wParam, LPAR
 	case cbRunAsAdmin:
 	{
 		// BCM_SETSHIELD = 5644
-		BOOL bRunAs = SendDlgItemMessage(hDlg, cbRunAsAdmin, BM_GETCHECK, 0, 0);
+		bool bRunAs = SendDlgItemMessage(hDlg, cbRunAsAdmin, BM_GETCHECK, 0, 0);
 
 		if (gOSVer.dwMajorVersion >= 6)
 		{

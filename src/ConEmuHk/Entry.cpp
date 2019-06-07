@@ -73,16 +73,17 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "../ConEmuCD/ExitCodes.h"
 
-
-#include "SetHook.h"
-#include "hlpProcess.h"
-#include "ShellProcessor.h"
-#include "GuiAttach.h"
-#include "Injects.h"
 #include "Ansi.h"
 #include "DefTermHk.h"
+#include "GuiAttach.h"
+#include "Injects.h"
 #include "MainThread.h"
+#include "SetHook.h"
+#include "ShellProcessor.h"
+#include "hlpProcess.h"
+
 #include "../ConEmu/version.h"
+
 #include "../common/CmdLine.h"
 #include "../common/ConsoleAnnotation.h"
 #include "../common/HkFunc.h"
@@ -528,7 +529,7 @@ wrap:
 	bAnsiLog = ((gpConInfo != NULL) && (gpConInfo->AnsiLog.Enabled && *gpConInfo->AnsiLog.Path));
 	if (bAnsiLog)
 	{
-		CEAnsi::InitAnsiLog(gpConInfo->AnsiLog.Path);
+		CEAnsi::InitAnsiLog(gpConInfo->AnsiLog.Path, gpConInfo->AnsiLog.LogAnsiCodes);
 	}
 	return gpConInfo;
 }
@@ -1151,7 +1152,7 @@ void InitExeFlags()
 		gnExeFlags |= caf_Msys2;
 
 	// Most probably, clink is not loaded yet, but we'll check
-	if (GetModuleHandle(WIN3264TEST(L"clink_dll_x86.dll", L"clink_dll_x64.dll")) != NULL)
+	if (IsClinkLoaded())
 		gnExeFlags |= caf_Clink;
 }
 
@@ -1676,6 +1677,7 @@ void DoDllStop(bool bFinal, ConEmuHkDllState bFromTerminate)
 
 	if (bFinal)
 	{
+		gfnSrvLogString = nullptr;
 		DLOG1("HeapDeinitialize",0);
 		gnDllState |= ds_HeapDeinitialized;
 		HeapDeinitialize();
@@ -2662,6 +2664,16 @@ BOOL WINAPI HookServerCommand(LPVOID pInst, CESERVER_REQ* pCmd, CESERVER_REQ* &p
 
 	BOOL lbRc = FALSE, lbFRc;
 
+	auto returnDWORD = [&](DWORD result)
+	{
+		pcbReplySize = sizeof(CESERVER_REQ_HDR) + sizeof(DWORD);
+		if (ExecuteNewCmd(ppReply, pcbMaxReplySize, pCmd->hdr.nCmd, pcbReplySize))
+		{
+			ppReply->dwData[0] = result;
+			lbRc = true;
+		}
+	};
+
 	switch (pCmd->hdr.nCmd)
 	{
 	case CECMD_ATTACHGUIAPP:
@@ -2683,10 +2695,7 @@ BOOL WINAPI HookServerCommand(LPVOID pInst, CESERVER_REQ* pCmd, CESERVER_REQ* &p
 			//ghConEmuWndDC -- еще нету
 			AttachGuiWindow(pCmd->AttachGuiApp.hAppWindow);
 			// Результат
-			pcbReplySize = sizeof(CESERVER_REQ_HDR)+sizeof(DWORD);
-			lbRc = ExecuteNewCmd(ppReply, pcbMaxReplySize, pCmd->hdr.nCmd, pcbReplySize);
-			if (lbRc)
-				ppReply->dwData[0] = LODWORD(ghAttachGuiClient);
+			returnDWORD(LODWORD(ghAttachGuiClient));
 		} // CECMD_ATTACHGUIAPP
 		break;
 	case CECMD_SETFOCUS:
@@ -2697,20 +2706,14 @@ BOOL WINAPI HookServerCommand(LPVOID pInst, CESERVER_REQ* pCmd, CESERVER_REQ* &p
 		if (CHECK_CMD_SIZE(pCmd,2*sizeof(DWORD)))
 		{
 			lbFRc = GenerateConsoleCtrlEvent(pCmd->dwData[0], pCmd->dwData[1]);
-			pcbReplySize = sizeof(CESERVER_REQ_HDR)+sizeof(DWORD);
-			lbRc = ExecuteNewCmd(ppReply, pcbMaxReplySize, pCmd->hdr.nCmd, pcbReplySize);
-			if (lbRc)
-				ppReply->dwData[0] = lbFRc;
+			returnDWORD(lbFRc);
 		} // CECMD_CTRLBREAK
 		break;
 	case CECMD_SETGUIEXTERN:
 		if (ghAttachGuiClient && (pCmd->DataSize() >= sizeof(CESERVER_REQ_SETGUIEXTERN)))
 		{
 			SetGuiExternMode(pCmd->SetGuiExtern.bExtern, NULL/*pCmd->SetGuiExtern.bDetach ? &pCmd->SetGuiExtern.rcOldPos : NULL*/);
-			pcbReplySize = sizeof(CESERVER_REQ_HDR)+sizeof(DWORD);
-			lbRc = ExecuteNewCmd(ppReply, pcbMaxReplySize, pCmd->hdr.nCmd, pcbReplySize);
-			if (lbRc)
-				ppReply->dwData[0] = gbGuiClientExternMode;
+			returnDWORD(gbGuiClientExternMode);
 
 			if (pCmd->SetGuiExtern.bExtern && pCmd->SetGuiExtern.bDetach)
 			{
@@ -2801,26 +2804,13 @@ BOOL WINAPI HookServerCommand(LPVOID pInst, CESERVER_REQ* pCmd, CESERVER_REQ* &p
 	case CECMD_EXPORTVARS:
 		{
 			ApplyExportEnvVar((LPCWSTR)pCmd->wData);
-
-			lbRc = true; // Вернуть результат однозначно
-
-			pcbReplySize = sizeof(CESERVER_REQ_HDR)+sizeof(DWORD);
-			if (ExecuteNewCmd(ppReply, pcbMaxReplySize, pCmd->hdr.nCmd, pcbReplySize))
-			{
-				ppReply->dwData[0] = TRUE;
-			}
+			returnDWORD(TRUE);
 		} // CECMD_EXPORTVARS
 		break;
 	case CECMD_DUPLICATE:
 		{
 			int nFRc = DuplicateRoot(&pCmd->Duplicate);
-
-			lbRc = true; // вернуть результат
-			pcbReplySize = sizeof(CESERVER_REQ_HDR)+sizeof(DWORD);
-			if (ExecuteNewCmd(ppReply, pcbMaxReplySize, pCmd->hdr.nCmd, pcbReplySize))
-			{
-				ppReply->dwData[0] = nFRc;
-			}
+			returnDWORD(nFRc);
 		} // CECMD_DUPLICATE
 		break;
 	}
@@ -2955,7 +2945,7 @@ int WINAPI RequestLocalServer(/*[IN/OUT]*/RequestLocalServerParm* Parm)
 
 	if (!ghSrvDll || !gfRequestLocalServer)
 	{
-		LPCWSTR pszSrvName = WIN3264TEST(L"ConEmuCD.dll",L"ConEmuCD64.dll");
+		LPCWSTR pszSrvName = ConEmuCD_DLL_3264;
 
 		if (!ghSrvDll)
 		{
@@ -2992,10 +2982,13 @@ int WINAPI RequestLocalServer(/*[IN/OUT]*/RequestLocalServerParm* Parm)
 
 	iRc = gfRequestLocalServer(Parm);
 
-	if  ((iRc == 0) && (Parm->Flags & slsf_PrevAltServerPID))
+	if  (iRc == 0)
 	{
 		// nPrevAltServerPID is DWORD_PTR for struct aligning purposes
-		gnPrevAltServerPID = (DWORD)Parm->nPrevAltServerPID;
+		if (Parm->Flags & slsf_PrevAltServerPID)
+			gnPrevAltServerPID = (DWORD)Parm->nPrevAltServerPID;
+		// Server logging callback
+		gfnSrvLogString = Parm->fSrvLogString;
 	}
 wrap:
 	return iRc;

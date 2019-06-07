@@ -633,7 +633,7 @@ bool CRgnDetect::FindFrameTop_ByRight(wchar_t* pChar, CharAttr* pAttr, int nWidt
 	return (nMostTop < nFromY);
 }
 
-bool CRgnDetect::FindFrameBottom_ByRight(wchar_t* pChar, CharAttr* pAttr, int nWidth, int nHeight, int &nFromX, int &nFromY, int &nMostBottom)
+bool CRgnDetect::FindFrameBottom_ByRight(wchar_t* pChar, CharAttr* pAttr, int nWidth, int nHeight, const int &nFromX, const int &nFromY, int &nMostBottom)
 {
 	// Попытаемся спуститься вдоль правой рамки до угла
 	int nY = nFromY;
@@ -712,7 +712,7 @@ bool CRgnDetect::FindDialog_Right(wchar_t* pChar, CharAttr* pAttr, int nWidth, i
 		nFromY = nY;
 
 	// Попытаемся спуститься вдоль правой рамки до угла
-	if (FindFrameBottom_ByRight(pChar, pAttr, nWidth, nHeight, nFromX, nMostBottom, nY))
+	if (FindFrameBottom_ByRight(pChar, pAttr, nWidth, nHeight, nFromX, nMostBottom, nY))  // -V764
 		nMostBottom = nY;
 
 	// Теперь можно искать диалог
@@ -1960,7 +1960,7 @@ BOOL CRgnDetect::GetCharAttr(int x, int y, wchar_t& rc, CharAttr& ra)
 
 
 // Эта функция вызывается из плагинов (ConEmuTh)
-void CRgnDetect::PrepareTransparent(const CEFAR_INFO_MAPPING *apFarInfo, const COLORREF *apColors)
+void CRgnDetect::PrepareTransparent(const CEFAR_INFO_MAPPING *apFarInfo, const COLORREF *apColors, bool bFarUserscreen)
 {
 	if (gbInTransparentAssert)
 		return;
@@ -1979,12 +1979,12 @@ void CRgnDetect::PrepareTransparent(const CEFAR_INFO_MAPPING *apFarInfo, const C
 	}
 
 	memmove(mp_AttrsWork, mp_Attrs, mn_CurWidth*mn_CurHeight*sizeof(*mp_AttrsWork));
-	PrepareTransparent(apFarInfo, apColors, &m_sbi, mpsz_Chars, mp_AttrsWork, mn_CurWidth, mn_CurHeight);
+	PrepareTransparent(apFarInfo, apColors, &m_sbi, mpsz_Chars, mp_AttrsWork, mn_CurWidth, mn_CurHeight, bFarUserscreen);
 }
 
 // Эта функция вызывается из GUI
 void CRgnDetect::PrepareTransparent(const CEFAR_INFO_MAPPING *apFarInfo, const COLORREF *apColors, const CONSOLE_SCREEN_BUFFER_INFO *apSbi,
-                                    wchar_t* pChar, CharAttr* pAttr, int nWidth, int nHeight)
+                                    wchar_t* pChar, CharAttr* pAttr, int nWidth, int nHeight, bool bFarUserscreen)
 {
 	_ASSERTE(pAttr!=mp_Attrs);
 	mp_FarInfo = apFarInfo;
@@ -2314,7 +2314,7 @@ void CRgnDetect::PrepareTransparent(const CEFAR_INFO_MAPPING *apFarInfo, const C
 
 	if (!lbLeftVisible && !lbRightVisible)
 	{
-		if (isPressed(VK_CONTROL) && isPressed(VK_SHIFT) && isPressed(VK_MENU))
+		if (bFarUserscreen)
 			goto wrap; // По CtrlAltShift - показать UserScreen (не делать его прозрачным)
 	}
 

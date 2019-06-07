@@ -35,6 +35,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "../common/ConsoleAnnotation.h"
 #include "../common/ConsoleRead.h"
 #include "../common/EmergencyShow.h"
+#include "../common/EnvVar.h"
 #include "../common/execute.h"
 #include "../common/MProcess.h"
 #include "../common/MProcessBits.h"
@@ -1069,7 +1070,7 @@ int ServerInit()
 			{
 				DumpInitStatus("\nServerInit: CreateThread(SetOemCpProc)");
 				DWORD nTID;
-				HANDLE h = apiCreateThread(SetOemCpProc, (LPVOID)nOemCP, &nTID, "SetOemCpProc");
+				HANDLE h = apiCreateThread(SetOemCpProc, (LPVOID)(DWORD_PTR)nOemCP, &nTID, "SetOemCpProc");
 				if (h && (h != INVALID_HANDLE_VALUE))
 				{
 					DWORD nWait = WaitForSingleObject(h, 5000);
@@ -1095,11 +1096,6 @@ int ServerInit()
 	// Смысла вроде не имеет, без ожидания "очистки" очереди винда "проглатывает мышиные события
 	// Межпроцессный семафор не помогает, оставил пока только в качестве заглушки
 	//InitializeConsoleInputSemaphore();
-
-	if (gpSrv->osv.dwMajorVersion == 6 && gpSrv->osv.dwMinorVersion == 1)
-		gpSrv->bReopenHandleAllowed = FALSE;
-	else
-		gpSrv->bReopenHandleAllowed = TRUE;
 
 	if (gnRunMode == RM_SERVER)
 	{
@@ -1199,13 +1195,6 @@ int ServerInit()
 	{
 		_ASSERTE(gnRunMode==RM_AUTOATTACH);
 	}
-	#if 0
-	_ASSERTE(gpcsStoredOutput==NULL && gpStoredOutput==NULL);
-	if (!gpcsStoredOutput)
-	{
-		gpcsStoredOutput = new MSection;
-	}
-	#endif
 
 
 	// Включить по умолчанию выделение мышью
@@ -1273,7 +1262,7 @@ int ServerInit()
 	swprintf_c(gpSrv->szDataReadyEvent, CEDATAREADYEVENT, gnSelfPID);
 	MCHKHEAP;
 
-	if (gpSrv->processes->pnProcesses == NULL || gpSrv->processes->pnProcessesGet == NULL || gpSrv->processes->pnProcessesCopy == NULL)
+	if (gpSrv->processes->pnProcesses.empty() || gpSrv->processes->pnProcessesGet.empty() || gpSrv->processes->pnProcessesCopy.empty())
 	{
 		_printf("Can't allocate %i DWORDS!\n", gpSrv->processes->nMaxProcesses);
 		iRc = CERR_NOTENOUGHMEM1; goto wrap;
@@ -1542,7 +1531,7 @@ int ServerInit()
 	{
 		// Его нужно дернуть, чтобы инициализировать цикл аттача во вкладку ConEmu
 		CESERVER_REQ* pIn = ExecuteNewCmd(CECMD_ATTACHGUIAPP, sizeof(CESERVER_REQ_HDR)+sizeof(CESERVER_REQ_ATTACHGUIAPP));
-		_ASSERTE(((DWORD)gpSrv->hRootProcessGui)!=0xCCCCCCCC);
+		_ASSERTE(LODWORD(gpSrv->hRootProcessGui)!=0xCCCCCCCC);
 		_ASSERTE(IsWindow(ghConEmuWnd));
 		_ASSERTE(IsWindow(ghConEmuWndDC));
 		_ASSERTE(IsWindow(ghConEmuWndBack));
@@ -1623,9 +1612,9 @@ void ServerDone(int aiRc, bool abReportShutdown /*= false*/)
 		}
 
 		#ifdef _DEBUG
-		int nCurProcCount = gpSrv->processes->nProcessCount;
+		UINT nCurProcCount = std::min(gpSrv->processes->nProcessCount, (UINT)gpSrv->processes->pnProcesses.size());
 		DWORD nCurProcs[20];
-		memmove(nCurProcs, gpSrv->processes->pnProcesses, std::min<DWORD>(nCurProcCount, 20) * sizeof(DWORD));
+		memmove(nCurProcs, &gpSrv->processes->pnProcesses[0], std::min<DWORD>(nCurProcCount, 20) * sizeof(DWORD));
 		_ASSERTE(nCurProcCount <= 1);
 		#endif
 
@@ -1750,14 +1739,6 @@ void ServerDone(int aiRc, bool abReportShutdown /*= false*/)
 
 	SafeDelete(gpSrv->pStoredOutputItem);
 	SafeDelete(gpSrv->pStoredOutputHdr);
-	#if 0
-	{
-		MSectionLock CS; CS.Lock(gpcsStoredOutput, TRUE);
-		SafeFree(gpStoredOutput);
-		CS.Unlock();
-		SafeDelete(gpcsStoredOutput);
-	}
-	#endif
 
 	SafeFree(gpSrv->pszAliases);
 
@@ -1805,6 +1786,8 @@ BOOL MyReadConsoleOutput(HANDLE hOut, CHAR_INFO *pData, COORD& bufSize, SMALL_RE
 // MAX_CONREAD_SIZE подобрано экспериментально
 BOOL MyWriteConsoleOutput(HANDLE hOut, CHAR_INFO *pData, COORD& bufSize, COORD& crBufPos, SMALL_RECT& rgn)
 {
+	LogFunction(L"MyWriteConsoleOutput");
+
 	BOOL lbRc = FALSE;
 
 	size_t nBufWidth = bufSize.X;
@@ -1853,7 +1836,7 @@ BOOL MyWriteConsoleOutput(HANDLE hOut, CHAR_INFO *pData, COORD& bufSize, COORD& 
 
 void ConOutCloseHandle()
 {
-	if (gpSrv->bReopenHandleAllowed)
+	if (isReopenHandleAllowed())
 	{
 		// Need to block all requests to output buffer in other threads
 		MSectionLockSimple csRead;
@@ -1864,32 +1847,26 @@ void ConOutCloseHandle()
 	}
 }
 
+// В Win7 закрытие дескриптора в ДРУГОМ процессе - закрывает консольный буфер ПОЛНОСТЬЮ!!!
+// В итоге, буфер вывода telnet'а схлопывается!
+bool isReopenHandleAllowed()
+{
+	// Windows 7 has a bug which makes impossible to utilize ScreenBuffers
+	// https://conemu.github.io/en/MicrosoftBugs.html#CorruptedScreenBuffer
+	if (IsWin7Eql())
+		return false;
+	return true;
+}
+
 bool CmdOutputOpenMap(CONSOLE_SCREEN_BUFFER_INFO& lsbi, CESERVER_CONSAVE_MAPHDR*& pHdr, CESERVER_CONSAVE_MAP*& pData)
 {
 	LogFunction(L"CmdOutputOpenMap");
 
-	pHdr = NULL;
-	pData = NULL;
-
-	// В Win7 закрытие дескриптора в ДРУГОМ процессе - закрывает консольный буфер ПОЛНОСТЬЮ!!!
-	// В итоге, буфер вывода telnet'а схлопывается!
-	if (gpSrv->bReopenHandleAllowed)
-	{
-		ConOutCloseHandle();
-	}
+	pHdr = nullptr;
+	pData = nullptr;
 
 	// Need to block all requests to output buffer in other threads
 	MSectionLockSimple csRead; csRead.Lock(&gpSrv->csReadConsoleInfo, LOCK_READOUTPUT_TIMEOUT);
-
-	// !!! Нас интересует реальное положение дел в консоли,
-	//     а не скорректированное функцией MyGetConsoleScreenBufferInfo
-	if (!GetConsoleScreenBufferInfo(ghConOut, &lsbi))
-	{
-		//CS.RelockExclusive();
-		//SafeFree(gpStoredOutput);
-		return false; // Не смогли получить информацию о консоли...
-	}
-
 
 	if (!gpSrv->pStoredOutputHdr)
 	{
@@ -1914,14 +1891,12 @@ bool CmdOutputOpenMap(CONSOLE_SCREEN_BUFFER_INFO& lsbi, CESERVER_CONSAVE_MAPHDR*
 		}
 	}
 
+	if (!lsbi.dwSize.Y)
+		lsbi = pHdr->info;
+
 	WARNING("А вот это нужно бы делать в RefreshThread!!!");
 	DEBUGSTR(L"--- CmdOutputStore begin\n");
 
-	//MSectionLock CS; CS.Lock(gpcsStoredOutput, FALSE);
-
-
-
-	COORD crMaxSize = MyGetLargestConsoleWindowSize(ghConOut);
 	DWORD cchOneBufferSize = lsbi.dwSize.X * lsbi.dwSize.Y; // Читаем всю консоль целиком!
 	DWORD cchMaxBufferSize = std::max<DWORD>(pHdr->MaxCellCount, (lsbi.dwSize.Y * lsbi.dwSize.X));
 
@@ -2005,24 +1980,44 @@ wrap:
 	return (pData != NULL);
 }
 
-// Сохранить данные ВСЕЙ консоли в gpStoredOutput
+// Сохранить данные ВСЕЙ консоли в mapping
 void CmdOutputStore(bool abCreateOnly /*= false*/)
 {
 	LogFunction(L"CmdOutputStore");
 
-	CONSOLE_SCREEN_BUFFER_INFO lsbi = {{0,0}};
+	const bool reopen_allowed = isReopenHandleAllowed();
+
+	CONSOLE_SCREEN_BUFFER_INFO lsbi = {};
 	CESERVER_CONSAVE_MAPHDR* pHdr = NULL;
 	CESERVER_CONSAVE_MAP* pData = NULL;
 
 	// Need to block all requests to output buffer in other threads
 	MSectionLockSimple csRead; csRead.Lock(&gpSrv->csReadConsoleInfo, LOCK_READOUTPUT_TIMEOUT);
+	LogString(L"csReadConsoleInfo locked");
+
+	if (reopen_allowed)
+		ConOutCloseHandle();
+
+	// !!! Нас интересует реальное положение дел в консоли,
+	//     а не скорректированное функцией MyGetConsoleScreenBufferInfo
+	if (!GetConsoleScreenBufferInfo(ghConOut, &lsbi) || !lsbi.dwSize.Y)
+	{
+		LogString("--- Skipped, GetConsoleScreenBufferInfo failed");
+		return; // Не смогли получить информацию о консоли...
+	}
+	// just for information
+	COORD crMaxSize = MyGetLargestConsoleWindowSize(ghConOut);
 
 	if (!CmdOutputOpenMap(lsbi, pHdr, pData))
+	{
+		LogString("--- Skipped, CmdOutputOpenMap failed");
 		return;
+	}
 
 	if (!pHdr || !pData)
 	{
 		_ASSERTE(pHdr && pData);
+		LogString("--- Skipped, invalid map data");
 		return;
 	}
 
@@ -2031,49 +2026,22 @@ void CmdOutputStore(bool abCreateOnly /*= false*/)
 	if (!pData->info.dwSize.Y || !abCreateOnly)
 		pData->info = lsbi;
 
-	if (abCreateOnly)
-		return;
+	if (!abCreateOnly)
+	{
+		// now we may read the console data
+		COORD BufSize = {lsbi.dwSize.X, lsbi.dwSize.Y};
+		SMALL_RECT ReadRect = {0, 0, lsbi.dwSize.X-1, lsbi.dwSize.Y-1};
 
-	//// Если требуется увеличение размера выделенной памяти
-	//if (gpStoredOutput)
-	//{
-	//	if (gpStoredOutput->hdr.cbMaxOneBufferSize < (DWORD)nOneBufferSize)
-	//	{
-	//		CS.RelockExclusive();
-	//		SafeFree(gpStoredOutput);
-	//	}
-	//}
+		// store/update sbi
+		pData->info = lsbi;
 
-	//if (gpStoredOutput == NULL)
-	//{
-	//	CS.RelockExclusive();
-	//	// Выделяем память: заголовок + буфер текста (на атрибуты забьем)
-	//	gpStoredOutput = (CESERVER_CONSAVE*)calloc(sizeof(CESERVER_CONSAVE_HDR)+nOneBufferSize,1);
-	//	_ASSERTE(gpStoredOutput!=NULL);
-
-	//	if (gpStoredOutput == NULL)
-	//		return; // Не смогли выделить память
-
-	//	gpStoredOutput->hdr.cbMaxOneBufferSize = nOneBufferSize;
-	//}
-
-	//// Запомнить sbi
-	////memmove(&gpStoredOutput->hdr.sbi, &lsbi, sizeof(lsbi));
-	//gpStoredOutput->hdr.sbi = lsbi;
-
-	// Теперь читаем данные
-	COORD BufSize = {lsbi.dwSize.X, lsbi.dwSize.Y};
-	SMALL_RECT ReadRect = {0, 0, lsbi.dwSize.X-1, lsbi.dwSize.Y-1};
-
-	// Запомнить/обновить sbi
-	pData->info = lsbi;
-
-	pData->Succeeded = MyReadConsoleOutput(ghConOut, pData->Data, BufSize, ReadRect);
-
-	csRead.Unlock();
+		LogString("MyReadConsoleOutput");
+		pData->Succeeded = MyReadConsoleOutput(ghConOut, pData->Data, BufSize, ReadRect);
+	}
 
 	LogString("CmdOutputStore finished");
 	DEBUGSTR(L"--- CmdOutputStore end\n");
+	UNREFERENCED_PARAMETER(crMaxSize);
 }
 
 // abSimpleMode==true  - просто восстановить экран на момент вызова CmdOutputStore
@@ -2083,6 +2051,8 @@ void CmdOutputRestore(bool abSimpleMode)
 {
 	LogFunction(L"CmdOutputRestore");
 
+	const bool reopen_allowed = isReopenHandleAllowed();
+
 	if (!abSimpleMode)
 	{
 		//_ASSERTE(FALSE && "Non Simple mode is not supported!");
@@ -2091,31 +2061,33 @@ void CmdOutputRestore(bool abSimpleMode)
 		return;
 	}
 
-
 	// Need to block all requests to output buffer in other threads
 	MSectionLockSimple csRead; csRead.Lock(&gpSrv->csReadConsoleInfo, LOCK_READOUTPUT_TIMEOUT);
+	LogString(L"csReadConsoleInfo locked");
 
-	CONSOLE_SCREEN_BUFFER_INFO lsbi = {{0,0}};
+	// Just in case we change the logic somehow
+	if (reopen_allowed)
+		ConOutCloseHandle();
+
+	CONSOLE_SCREEN_BUFFER_INFO lsbi = {};
 	CESERVER_CONSAVE_MAPHDR* pHdr = NULL;
 	CESERVER_CONSAVE_MAP* pData = NULL;
 	if (!CmdOutputOpenMap(lsbi, pHdr, pData))
+	{
+		LogString(L"--- Skipped, CmdOutputOpenMap failed");
 		return;
+	}
 
 	if (lsbi.srWindow.Top > 0)
 	{
 		_ASSERTE(lsbi.srWindow.Top == 0 && "Upper left corner of window expected");
+		wchar_t err_msg[80];
+		msprintf(err_msg, std::size(err_msg),
+			L"Invalid upper-left corner; sr={%i,%i}-{%i,%i}",
+			LogSRectCoords(lsbi.srWindow));
+		LogString(err_msg);
 		return;
 	}
-
-#if 0
-	// Event if there were no backscroll - we may restore saved content!
-	if (lsbi.dwSize.Y <= (lsbi.srWindow.Bottom - lsbi.srWindow.Top + 1))
-	{
-		// There is no scroller in window
-		// Nothing to do
-		return;
-	}
-#endif
 
 	CHAR_INFO chrFill = {};
 	chrFill.Attributes = lsbi.wAttributes;
@@ -2125,6 +2097,7 @@ void CmdOutputRestore(bool abSimpleMode)
 	COORD crMoveTo = {0, lsbi.dwSize.Y - 1 - lsbi.srWindow.Bottom};
 	if (!ScrollConsoleScreenBuffer(ghConOut, &rcTop, NULL, crMoveTo, &chrFill))
 	{
+		LogString(L"--- Skipped, ScrollConsoleScreenBuffer failed");
 		return;
 	}
 
@@ -2133,7 +2106,6 @@ void CmdOutputRestore(bool abSimpleMode)
 
 	if (abSimpleMode)
 	{
-
 		crMoveTo.Y = std::min<int>(pData->info.srWindow.Top, std::max<int>(0,lsbi.dwSize.Y-h));
 	}
 
@@ -2143,20 +2115,6 @@ void CmdOutputRestore(bool abSimpleMode)
 	COORD crNewPos = {lsbi.dwCursorPosition.X, lsbi.dwCursorPosition.Y + crMoveTo.Y};
 	SetConsoleCursorPosition(ghConOut, crNewPos);
 
-#if 0
-	MSectionLock CS; CS.Lock(gpcsStoredOutput, TRUE);
-	if (gpStoredOutput)
-	{
-
-		// Учесть, что ширина консоли могла измениться со времени выполнения предыдущей команды.
-		// Сейчас у нас в верхней части консоли может оставаться кусочек предыдущего вывода (восстановил FAR).
-		// 1) Этот кусочек нужно считать
-		// 2) Скопировать в нижнюю часть консоли (до которой докрутилась предыдущая команда)
-		// 3) прокрутить консоль до предыдущей команды (куда мы только что скопировали данные сверху)
-		// 4) восстановить оставшуюся часть консоли. Учесть, что фар может
-		//    выполнять некоторые команды сам и курсор вообще-то мог несколько уехать...
-	}
-#endif
 
 	// Восстановить текст скрытой (прокрученной вверх) части консоли
 	// Учесть, что ширина консоли могла измениться со времени выполнения предыдущей команды.
@@ -2174,7 +2132,7 @@ void CmdOutputRestore(bool abSimpleMode)
 
 	CONSOLE_SCREEN_BUFFER_INFO storedSbi = pData->info;
 	COORD crOldBufSize = pData->info.dwSize; // Может быть шире или уже чем текущая консоль!
-	SMALL_RECT rcWrite = {0, 0, std::min<int>(crOldBufSize.X,lsbi.dwSize.X)-1, std::min<int>(crOldBufSize.Y,lsbi.dwSize.Y)-1};
+	SMALL_RECT rcWrite = MakeSmallRect(0, 0, std::min<int>(crOldBufSize.X,lsbi.dwSize.X)-1, std::min<int>(crOldBufSize.Y,lsbi.dwSize.Y)-1);
 	COORD crBufPos = {0,0};
 
 	if (!abSimpleMode)
@@ -2204,6 +2162,7 @@ void CmdOutputRestore(bool abSimpleMode)
 
 	if (abSimpleMode)
 	{
+		LogString("SetConsoleTextAttribute");
 		SetConsoleTextAttribute(ghConOut, pData->info.wAttributes);
 	}
 
@@ -2425,17 +2384,18 @@ void CheckConEmuHwnd()
 			// ghConEmuWndDC по идее уже должен быть получен из GUI через пайпы
 			LogFunction(L"Warning, ghConEmuWndDC still not initialized");
 			_ASSERTE(ghConEmuWndDC!=NULL);
-			HWND hBack = NULL, hDc = NULL;
 			wchar_t szClass[128];
+			HWND hBack = NULL;
 			while (!ghConEmuWndDC)
 			{
 				hBack = FindWindowEx(ghConEmuWnd, hBack, VirtualConsoleClassBack, NULL);
 				if (!hBack)
 					break;
-				if (GetWindowLong(hBack, 0) == LOLONG(ghConWnd))
+				if (GetWindowLong(hBack, WindowLongBack_ConWnd) == LOLONG(ghConWnd))
 				{
-					hDc = (HWND)(DWORD)GetWindowLong(hBack, 4);
-					if (IsWindow(hDc) && GetClassName(hDc, szClass, countof(szClass) && !lstrcmp(szClass, VirtualConsoleClass)))
+					const HWND2 hDc{(DWORD)GetWindowLong(hBack, WindowLongBack_DCWnd)};
+					if (IsWindow(hDc) && GetClassName(hDc, szClass, countof(szClass)
+						&& (0 == lstrcmp(szClass, VirtualConsoleClass))))
 					{
 						SetConEmuWindows(ghConEmuWnd, hDc, hBack);
 						break;
@@ -2920,8 +2880,8 @@ HWND Attach2Gui(DWORD nTimeout)
 		{
 			// `-cmd`, `-cmdlist`, `-run` or `-runlist` must be in the "ConEmuArgs2" only!
 			#ifdef _DEBUG
-			CEStr lsFirst;
-			_ASSERTE(QueryNextArg(cfgSwitches,lsFirst) && !lsFirst.OneOfSwitches(L"-cmd",L"-cmdlist",L"-run",L"-runlist"));
+			CmdArg lsFirst; LPCWSTR pszCfgSwitches = cfgSwitches.c_str();
+			_ASSERTE(NextArg(pszCfgSwitches,lsFirst) && !lsFirst.OneOfSwitches(L"-cmd",L"-cmdlist",L"-run",L"-runlist"));
 			#endif
 
 			lstrmerge(&lsGuiCmd.ms_Val, L" ", cfgSwitches);
@@ -3687,8 +3647,7 @@ void InitAnsiLog(const ConEmuAnsiLog& AnsiLog)
 	LogFunction(L"InitAnsiLog");
 	// Reset first
 	SetEnvironmentVariable(ENV_CONEMUANSILOG_VAR_W, L"");
-	gpSrv->AnsiLog.Enabled = FALSE;
-	gpSrv->AnsiLog.Path[0] = 0;
+	gpSrv->AnsiLog = {};
 	// Enabled?
 	if (!AnsiLog.Enabled || !*AnsiLog.Path)
 	{
@@ -3696,44 +3655,44 @@ void InitAnsiLog(const ConEmuAnsiLog& AnsiLog)
 		return;
 	}
 	// May contains variables
-	wchar_t* pszExp = ExpandEnvStr(AnsiLog.Path);
-	// Max path = (MAX_PATH - "ConEmu-yyyy-mm-dd-p12345.log")
-	wchar_t szPath[MAX_PATH] = L"", szName[40] = L"";
-	SYSTEMTIME st = {}; GetLocalTime(&st);
-	msprintf(szName, countof(szName), CEANSILOGNAMEFMT, st.wYear, st.wMonth, st.wDay, GetCurrentProcessId());
-	int nNameLen = lstrlen(szName);
-	lstrcpyn(szPath, pszExp ? pszExp : AnsiLog.Path, countof(szPath)-nNameLen);
-	int nLen = lstrlen(szPath);
-	if ((nLen >= 1) && (szPath[nLen-1] != L'\\'))
-		szPath[nLen++] = L'\\';
-	if (!DirectoryExists(szPath))
+	CEStr log_file(ExpandEnvStr(AnsiLog.Path));
+	if (log_file.IsEmpty())
+		log_file.Set(AnsiLog.Path);
+	const wchar_t* ptr_name = PointToName(log_file.c_str());
+	if (!ptr_name)
 	{
-		if (!MyCreateDirectory(szPath))
+		_ASSERTE(ptr_name != nullptr);
+		return;
+	}
+	const ssize_t idx_name = ptr_name - log_file.c_str();
+	const wchar_t name_chr = log_file.SetAt(idx_name, 0);
+	if (!DirectoryExists(log_file))
+	{
+		if (!MyCreateDirectory(log_file.ms_Val))
 		{
 			DWORD dwErr = GetLastError();
 			_printf("Failed to create AnsiLog-files directory:\n");
-			_wprintf(szPath);
+			_wprintf(log_file);
 			print_error(dwErr);
 			return;
 		}
 	}
-	// Prepare path
-	wcscat_c(szPath, szName);
+	log_file.SetAt(idx_name, name_chr);
 	// Try to create
-	HANDLE hLog = CreateFile(szPath, GENERIC_WRITE, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-	if (hLog == INVALID_HANDLE_VALUE)
+	HANDLE hLog = CreateFile(log_file, GENERIC_WRITE, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (!hLog || hLog == INVALID_HANDLE_VALUE)
 	{
 		DWORD dwErr = GetLastError();
 		_printf("Failed to create new AnsiLog-file:\n");
-		_wprintf(szPath);
+		_wprintf(log_file);
 		print_error(dwErr);
 		return;
 	}
 	CloseHandle(hLog);
 	// OK!
-	gpSrv->AnsiLog.Enabled = TRUE;
-	wcscpy_c(gpSrv->AnsiLog.Path, szPath);
-	SetEnvironmentVariable(ENV_CONEMUANSILOG_VAR_W, szPath);
+	gpSrv->AnsiLog = AnsiLog;
+	wcscpy_c(gpSrv->AnsiLog.Path, log_file);
+	SetEnvironmentVariable(ENV_CONEMUANSILOG_VAR_W, log_file);
 }
 
 #if 0
@@ -4123,7 +4082,7 @@ static int ReadConsoleInfo()
 	//CheckProcessCount(); -- уже должно быть вызвано !!!
 	//2010-05-26 Изменения в списке процессов не приходили в GUI до любого чиха в консоль.
 	#ifdef _DEBUG
-	_ASSERTE(gpSrv->processes->pnProcesses!=NULL);
+	_ASSERTE(gpSrv->processes->pnProcesses.size() > 0);
 	if (!gpSrv->processes->nProcessCount)
 	{
 		_ASSERTE(gpSrv->processes->nProcessCount); //CheckProcessCount(); -- must be already initialized !!!
@@ -4566,7 +4525,7 @@ bool FreezeRefreshThread()
 		_ASSERTE(GetCurrentThreadId() != gpSrv->dwRefreshThread);
 		return false;
 	}
-	
+
 	gpSrv->nRefreshFreezeRequests++;
 	ResetEvent(gpSrv->hFreezeRefreshThread);
 
@@ -4803,7 +4762,7 @@ DWORD WINAPI RefreshThread(LPVOID lpvParam)
 		// Always update con handle, мягкий вариант
 		// !!! В Win7 закрытие дескриптора в ДРУГОМ процессе - закрывает консольный буфер ПОЛНОСТЬЮ. В итоге, буфер вывода telnet'а схлопывается! !!!
 		// 120507 - Если крутится альт.сервер - то игнорировать
-		if (gpSrv->bReopenHandleAllowed
+		if (isReopenHandleAllowed()
 			&& !nAltWait
 			&& ((GetTickCount() - nLastConHandleTick) > UPDATECONHANDLE_TIMEOUT))
 		{
@@ -5295,7 +5254,7 @@ int MySetWindowRgn(CESERVER_REQ_SETWINDOWRGN* pRgn)
 		int nRgn = hRgn ? GetRgnBox(hRgn, &rcBox) : NULLREGION;
 		swprintf_c(szInfo,
 			nRgn ? L"CECMD_SETWINDOWRGN(0x%08X, <%u> {%i,%i}-{%i,%i})" : L"CECMD_SETWINDOWRGN(0x%08X, NULL)",
-			(DWORD)(HWND)pRgn->hWnd, nRgn, LOGRECTCOORDS(rcBox));
+			(DWORD)(DWORD_PTR)(HWND)pRgn->hWnd, nRgn, LOGRECTCOORDS(rcBox));
 		LogString(szInfo);
 	}
 

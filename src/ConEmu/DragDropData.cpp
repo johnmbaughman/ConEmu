@@ -31,9 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define SHOWDEBUGSTR
 
 #include "Header.h"
-#pragma warning(disable: 4091)
-#include <shlobj.h>
-#pragma warning(default: 4091)
+#include "../common/shlobj.h"
 #if defined(__GNUC__) && !defined(__MINGW64_VERSION_MAJOR)
 #include "ShObjIdl_Part.h"
 #endif
@@ -620,7 +618,7 @@ BOOL CDragDropData::AddFmt_HDROP(wchar_t* pszDraggedPath, UINT nFilesCount, int 
 
 	if (!drop_data)
 	{
-		_ASSERTE(drop_data);
+		_ASSERTE(drop_data);  // -V571
 		gpConEmu->DebugStep(_T("DnD: Memory allocation failed!"), TRUE);
 		goto wrap;
 	}
@@ -949,7 +947,7 @@ void CDragDropData::EnumDragFormats(IDataObject * pDataObject, HANDLE hDumpFile 
 	memset(stg, 0, sizeof(stg));
 	memset(psz, 0, sizeof(psz));
 	memset(pszData, 0, sizeof(pszData));
-	if (!szNames.alloc(nCnt))
+	if (!szNames.resize(nCnt))
 		return;
 
 	if (hDumpFile) WriteFile(hDumpFile, "\xFF\xFE", 2, &nWritten, NULL);
@@ -1549,7 +1547,7 @@ BOOL CDragDropData::PaintDragImageBits(wchar_t* pszFiles, HDC& hDrawDC, HBITMAP&
 		hDrawDC = CreateCompatibleDC(hScreenDC);
 		if (!hDrawDC)
 		{
-			_ASSERTE(hDrawDC);
+			_ASSERTE(hDrawDC);  // -V571
 			if (hScreenDC) ::ReleaseDC(0, hScreenDC);
 			return FALSE;
 		}
@@ -1561,7 +1559,7 @@ BOOL CDragDropData::PaintDragImageBits(wchar_t* pszFiles, HDC& hDrawDC, HBITMAP&
 		hBitmap = CreateCompatibleBitmap(hScreenDC, nWidth, nHeight);
 		if (!hBitmap)
 		{
-			_ASSERTE(hBitmap);
+			_ASSERTE(hBitmap);  // -V571
 			if (bCreateDC) DeleteDC(hDrawDC);
 			if (hScreenDC) ::ReleaseDC(0, hScreenDC);
 			return FALSE;

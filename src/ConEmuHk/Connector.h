@@ -42,7 +42,6 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // struct RequestTermConnectorParm
 #include "../modules/terminals/ConnectorAPI.h"
 
-
 #if defined(__GNUC__)
 extern "C" {
 #endif
@@ -50,3 +49,5 @@ extern "C" {
 #if defined(__GNUC__)
 };
 #endif
+
+bool isConnectorStarted();

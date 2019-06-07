@@ -51,6 +51,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "../common/MAssert.h"
 #include "../common/MStrDup.h"
 #include "../common/CEStr.h"
+#include "../common/Keyboard.h"
 
 #if defined(__GNUC__) && !defined(__MINGW64_VERSION_MAJOR)
 #define wmemmove_s(d,ds,s,ss) wmemmove(d,s,ss)
@@ -157,7 +158,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //#define SafeCloseHandle(h) { if ((h)!=NULL) { HANDLE hh = (h); (h) = NULL; if (hh!=INVALID_HANDLE_VALUE) CloseHandle(hh); } }
 //#define SafeFree(p) { if ((p)!=NULL) { LPVOID pp = (p); (p) = NULL; free(pp); } }
 
-#define isWheelEvent(messg) ((messg == WM_MOUSEWHEEL) || (messg == WM_MOUSEHWHEEL/*0x020E*/))
+#define isWheelEvent(messg) (((messg) == WM_MOUSEWHEEL) || ((messg) == WM_MOUSEHWHEEL/*0x020E*/))
 
 #ifdef MSGLOGGER
 BOOL POSTMESSAGE(HWND h,UINT m,WPARAM w,LPARAM l,BOOL extra);
@@ -668,7 +669,7 @@ union CESize
 		if (!NewValue)
 		{
 			// Size can't be empty
-			_ASSERTE(NewValue);
+			_ASSERTE(NewValue);  // -V571
 			// Fail
 			return false;
 		}

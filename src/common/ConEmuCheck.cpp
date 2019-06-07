@@ -751,6 +751,24 @@ CESERVER_REQ* ExecuteSrvCmd(DWORD dwSrvPID, CESERVER_REQ* pIn, HWND hOwner, BOOL
 	return lpRet;
 }
 
+// Выполнить в ConEmuC
+CESERVER_REQ* ExecuteSrvCmd(DWORD dwSrvPID, DWORD nCmd, size_t cbDataSize, LPBYTE data, HWND hOwner, BOOL bAsyncNoResult /*= FALSE*/)
+{
+	CESERVER_REQ* pOut = NULL;
+
+	if (CESERVER_REQ* pIn = ExecuteNewCmd(nCmd, sizeof(CESERVER_REQ_HDR)+cbDataSize))
+	{
+		if (cbDataSize && data)
+			memmove_s(pIn->Data, pIn->DataSize(), data, cbDataSize);
+
+		pOut = ExecuteSrvCmd(dwSrvPID, pIn, hOwner, bAsyncNoResult);
+
+		ExecuteFreeResult(pIn);
+	}
+
+	return pOut;
+}
+
 // Выполнить в ConEmuHk
 CESERVER_REQ* ExecuteHkCmd(DWORD dwHkPID, CESERVER_REQ* pIn, HWND hOwner, BOOL bAsyncNoResult /*= FALSE*/, BOOL bIgnoreAbsence /*= FALSE*/)
 {
@@ -1060,7 +1078,7 @@ bool isConsoleWindow(HWND hWnd)
 
 	// RealConsole handle is stored in the Window DATA
 	wchar_t szClassPtr[64] = L"";
-	HWND h = (HWND)GetWindowLongPtr(hWnd, 0);
+	HWND h = (HWND)GetWindowLongPtr(hWnd, WindowLongDCWnd_ConWnd);
 	if (h && (h != hWnd) && IsWindow(h))
 	{
 		if (GetClassName(h, szClassPtr, countof(szClassPtr)))
@@ -1116,7 +1134,7 @@ HWND myGetConsoleWindow()
 			#endif
 
 			// Regardless of GetClassName result, it may be VirtualConsoleClass
-			HWND h = (HWND)GetWindowLongPtr(hConWnd, 0);
+			HWND h = (HWND)GetWindowLongPtr(hConWnd, WindowLongDCWnd_ConWnd);
 			if (h && IsWindow(h) && isConsoleWindow(h))
 			{
 				hConWnd = h;

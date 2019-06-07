@@ -1,6 +1,6 @@
 ﻿
 /*
-Copyright (c) 2017 Maximus5
+Copyright (c) 2017-present Maximus5
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -48,6 +48,10 @@ public:
 	SizeInfo(const SizeInfo& src);
 	virtual ~SizeInfo();
 
+	SizeInfo& operator=(const SizeInfo&) = delete;
+	SizeInfo& operator=(SizeInfo&&) = delete;
+	SizeInfo(SizeInfo&&) = delete;
+
 public:
 	// *** Relative to the upper-left corner of the screen or the parent (if Inside mode) ***
 
@@ -89,8 +93,10 @@ public:
 	};
 
 public:
-	// This function DOES NOT do size recalculation!!!
+	// These functions DOES NOT do size recalculation!!!
 	const WindowRectangles& GetRectState() const;
+	int GetDefaultTabbarHeight() const;
+
 	// Check if sizes are up to date
 	bool isCalculated() const;
 	// Following functions deprecate current sizes, recalculation will be executed on next size request

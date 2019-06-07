@@ -31,16 +31,16 @@ workspace "CE"
     toolset "v110_xp"
 
   filter "configurations:Release"
-    defines { "NDEBUG", "HIDE_TODO" }
+    defines { "NDEBUG", "HIDE_TODO", "NOMINMAX" }
     optimize "Size"
     symbols "On"
 
   filter "configurations:Debug"
-    defines { "_DEBUG", "HIDE_TODO", "MSGLOGGER" }
+    defines { "_DEBUG", "HIDE_TODO", "MSGLOGGER", "NOMINMAX" }
     symbols "On"
 
   filter "configurations:Remote"
-    defines { "_DEBUG", "HIDE_TODO", "MSGLOGGER" }
+    defines { "_DEBUG", "HIDE_TODO", "MSGLOGGER", "NOMINMAX" }
     symbols "On"
 
   filter{}
@@ -118,10 +118,12 @@ local common_kernel = {
   "src/common/ConEmuCheck.*",
   "src/common/ConsoleMixAttr.*",
   "src/common/ConsoleRead.*",
+  "src/common/EnvVar.*",
   "src/common/Execute.*",
   "src/common/HandleKeeper.*",
   "src/common/HkFunc.*",
   "src/common/InQueue.*",
+  "src/common/Keyboard.*",
   "src/common/MAssert.*",
   "src/common/MConHandle.*",
   "src/common/Memory.*",
@@ -261,6 +263,8 @@ project "ConEmu"
     "**/!*.*",
   }
 
+  removefiles (common_remove)
+
   vpaths {
     { ["Common"]    = {"src/common/*.h"} },
     { ["Resources"] = {"**/*.rc", "**/*.rc2", "**/*.manifest", "**/*.bmp", "**/*.cur", "**/*.ico"} },
@@ -369,6 +373,7 @@ project "ConEmuCD"
   vpaths {
     { ["Interface"] = {"**/Common.h", "**/SrvCommands.*", "**/Queue.*", "**/SrvPipes.*"} },
     { ["Automation"] = {"**/Actions.*", "**/GuiMacro.*"} },
+    { ["Console"] = {"**/ConAnsi.*", "**/ConAnsiImpl.*", "**/ConData.*"} },
     { ["Headers"] = {"**.h"} },
     { ["Sources"] = {"**.cpp"} },
     { ["Resources"] = {"**.rc", "**.rc2", "**.manifest"} },

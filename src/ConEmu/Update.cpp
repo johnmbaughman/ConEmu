@@ -29,9 +29,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define HIDE_USE_EXCEPTION_INFO
 #include "Header.h"
 #include <Wininet.h>
-#pragma warning(disable: 4091)
-#include <shlobj.h>
-#pragma warning(default: 4091)
+#include "../common/shlobj.h"
 #include "Update.h"
 #include "UpdateConst.h"
 #include "UpdateSet.h"
@@ -1507,7 +1505,8 @@ bool CConEmuUpdate::IsLocalFile(LPWSTR& asPathOrUrl)
 
 BOOL CConEmuUpdate::DownloadFile(LPCWSTR asSource, LPCWSTR asTarget, DWORD& crc, BOOL abPackage /*= FALSE*/, LARGE_INTEGER* rpSize /*= NULL*/)
 {
-	BOOL lbRc = FALSE, lbRead = FALSE, lbWrite = FALSE;
+	bool lbRc = false;
+	BOOL lbRead = FALSE, lbWrite = FALSE;
 	CEDownloadErrorArg args[3] = {};
 
 	MCHKHEAP;
@@ -1816,8 +1815,8 @@ bool CConEmuUpdate::Check7zipInstalled()
 		return true; // Инсталлер, архиватор не требуется!
 
 	LPCWSTR pszCmd = mp_Set->UpdateArcCmdLine();
-	CEStr sz7zip; sz7zip.GetBuffer(MAX_PATH);
-	if (NextArg(&pszCmd, sz7zip) != 0)
+	CmdArg sz7zip;
+	if (!NextArg(pszCmd, sz7zip))
 	{
 		ReportError(L"Invalid update command\nGoto 'Update' page and check 7-zip command", 0);
 		return false;
@@ -2263,17 +2262,17 @@ bool CConEmuUpdate::wininet::Init(CConEmuUpdate* apUpd)
 
 	pUpd = apUpd;
 
-	pszLib = lstrmerge(gpConEmu->ms_ConEmuBaseDir, WIN3264TEST(L"\\ConEmuCD.dll",L"\\ConEmuCD64.dll"));
+	pszLib = lstrmerge(gpConEmu->ms_ConEmuBaseDir, L"\\", ConEmuCD_DLL_3264);
 	lhDll = pszLib ? LoadLibrary(pszLib) : NULL;
 	if (!lhDll)
 	{
 		_ASSERTE(lhDll!=NULL);
-		lhDll = LoadLibrary(WIN3264TEST(L"ConEmuCD.dll",L"ConEmuCD64.dll"));
+		lhDll = LoadLibrary(ConEmuCD_DLL_3264);
 	}
 	if (!lhDll)
 	{
 		DWORD nErr = GetLastError();
-		pUpd->ReportError(L"Required library '%s' was not loaded, code=%u", WIN3264TEST(L"ConEmuCD.dll",L"ConEmuCD64.dll"), nErr);
+		pUpd->ReportError(L"Required library '%s' was not loaded, code=%u", ConEmuCD_DLL_3264, nErr);
 		goto wrap;
 	}
 
@@ -2281,7 +2280,7 @@ bool CConEmuUpdate::wininet::Init(CConEmuUpdate* apUpd)
 	if (!lDownloadCommand)
 	{
 		pUpd->ReportError(L"Exported function DownloadCommand in '%s' not found! Check your installation!",
-			WIN3264TEST(L"ConEmuCD.dll",L"ConEmuCD64.dll"), GetLastError());
+			ConEmuCD_DLL_3264, GetLastError());
 		goto wrap;
 	}
 

@@ -1075,8 +1075,8 @@ LRESULT CFrameHolder::DoNcHitTest(const POINT& point, int width, int height, LPA
 		}
 	}
 
-	// Чтобы окно нельзя было "таскать" за табы
-	if (l_result == HTCAPTION && gpSet->isTabs)
+	// The window should not be draggable by Tabs
+	if (l_result == HTCAPTION && gpSet->isTabs && mp_ConEmu->mp_TabBar)
 	{
 		if (mp_ConEmu->mp_TabBar->TabFromCursor(point) >= 0 || mp_ConEmu->mp_TabBar->TabBtnFromCursor(point) >= 0)
 		{
@@ -1085,7 +1085,7 @@ LRESULT CFrameHolder::DoNcHitTest(const POINT& point, int width, int height, LPA
 	}
 
 	if (l_result == HTTOP && gpSet->isHideCaptionAlways()
-		&& (!mp_ConEmu->mp_TabBar || !mp_ConEmu->mp_TabBar->IsTabsShown()
+		&& (!mp_ConEmu->mp_TabBar || !mp_ConEmu->isTabsShown()
 			|| (IsWin10() && gpSet->nTabsLocation))
 		)
 	{

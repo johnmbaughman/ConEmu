@@ -36,6 +36,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 //#define SHOW_INJECT_MSGBOX
 
+#include "../common/defines.h"
 #include "ConEmuSrv.h"
 #include "../common/CmdLine.h"
 #include "../common/ConsoleAnnotation.h"
@@ -61,6 +62,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "../ConEmu/version.h"
 #include "../ConEmuHk/Injects.h"
 #include "Actions.h"
+#include "ConAnsi.h"
 #include "ConProcess.h"
 #include "ConsoleHelp.h"
 #include "GuiMacro.h"
@@ -522,6 +524,7 @@ BOOL cmd_SetSizeXXX_CmdStartedFinished(CESERVER_REQ& in, CESERVER_REQ** out)
 		if (in.hdr.nCmd == CECMD_CMDSTARTED)
 		{
 			// Восстановить текст скрытой (прокрученной вверх) части консоли
+			// #LongConsoleOutput This does not work
 			CmdOutputRestore(false);
 		}
 	}
@@ -1143,34 +1146,34 @@ BOOL cmd_CmdStartStop(CESERVER_REQ& in, CESERVER_REQ** out)
 	switch (in.StartStop.nStarted)
 	{
 		case sst_ServerStart:
-			swprintf_c(szDbg, L"SRV received CECMD_CMDSTARTSTOP(ServerStart,%i,PID=%u)\n", in.hdr.nCreateTick, in.StartStop.dwPID);
+			swprintf_c(szDbg, L"SRV received CECMD_CMDSTARTSTOP(ServerStart,%i,PID=%u)", in.hdr.nCreateTick, in.StartStop.dwPID);
 			break;
 		case sst_AltServerStart:
-			swprintf_c(szDbg, L"SRV received CECMD_CMDSTARTSTOP(AltServerStart,%i,PID=%u)\n", in.hdr.nCreateTick, in.StartStop.dwPID);
+			swprintf_c(szDbg, L"SRV received CECMD_CMDSTARTSTOP(AltServerStart,%i,PID=%u)", in.hdr.nCreateTick, in.StartStop.dwPID);
 			break;
 		case sst_ServerStop:
-			swprintf_c(szDbg, L"SRV received CECMD_CMDSTARTSTOP(ServerStop,%i,PID=%u)\n", in.hdr.nCreateTick, in.StartStop.dwPID);
+			swprintf_c(szDbg, L"SRV received CECMD_CMDSTARTSTOP(ServerStop,%i,PID=%u)", in.hdr.nCreateTick, in.StartStop.dwPID);
 			break;
 		case sst_AltServerStop:
-			swprintf_c(szDbg, L"SRV received CECMD_CMDSTARTSTOP(AltServerStop,%i,PID=%u)\n", in.hdr.nCreateTick, in.StartStop.dwPID);
+			swprintf_c(szDbg, L"SRV received CECMD_CMDSTARTSTOP(AltServerStop,%i,PID=%u)", in.hdr.nCreateTick, in.StartStop.dwPID);
 			break;
 		case sst_ComspecStart:
-			swprintf_c(szDbg, L"SRV received CECMD_CMDSTARTSTOP(ComspecStart,%i,PID=%u)\n", in.hdr.nCreateTick, in.StartStop.dwPID);
+			swprintf_c(szDbg, L"SRV received CECMD_CMDSTARTSTOP(ComspecStart,%i,PID=%u)", in.hdr.nCreateTick, in.StartStop.dwPID);
 			break;
 		case sst_ComspecStop:
-			swprintf_c(szDbg, L"SRV received CECMD_CMDSTARTSTOP(ComspecStop,%i,PID=%u)\n", in.hdr.nCreateTick, in.StartStop.dwPID);
+			swprintf_c(szDbg, L"SRV received CECMD_CMDSTARTSTOP(ComspecStop,%i,PID=%u)", in.hdr.nCreateTick, in.StartStop.dwPID);
 			break;
 		case sst_AppStart:
-			swprintf_c(szDbg, L"SRV received CECMD_CMDSTARTSTOP(AppStart,%i,PID=%u)\n", in.hdr.nCreateTick, in.StartStop.dwPID);
+			swprintf_c(szDbg, L"SRV received CECMD_CMDSTARTSTOP(AppStart,%i,PID=%u)", in.hdr.nCreateTick, in.StartStop.dwPID);
 			break;
 		case sst_AppStop:
-			swprintf_c(szDbg, L"SRV received CECMD_CMDSTARTSTOP(AppStop,%i,PID=%u)\n", in.hdr.nCreateTick, in.StartStop.dwPID);
+			swprintf_c(szDbg, L"SRV received CECMD_CMDSTARTSTOP(AppStop,%i,PID=%u)", in.hdr.nCreateTick, in.StartStop.dwPID);
 			break;
 		case sst_App16Start:
-			swprintf_c(szDbg, L"SRV received CECMD_CMDSTARTSTOP(App16Start,%i,PID=%u)\n", in.hdr.nCreateTick, in.StartStop.dwPID);
+			swprintf_c(szDbg, L"SRV received CECMD_CMDSTARTSTOP(App16Start,%i,PID=%u)", in.hdr.nCreateTick, in.StartStop.dwPID);
 			break;
 		case sst_App16Stop:
-			swprintf_c(szDbg, L"SRV received CECMD_CMDSTARTSTOP(App16Stop,%i,PID=%u)\n", in.hdr.nCreateTick, in.StartStop.dwPID);
+			swprintf_c(szDbg, L"SRV received CECMD_CMDSTARTSTOP(App16Stop,%i,PID=%u)", in.hdr.nCreateTick, in.StartStop.dwPID);
 			break;
 		default:
 			// _ASSERTE могут приводить к ошибкам блокировки gpSrv->processes->csProc в других потоках. Но ассертов быть не должно )
@@ -1747,29 +1750,24 @@ BOOL cmd_FreezeAltServer(CESERVER_REQ& in, CESERVER_REQ** out)
 	return TRUE;
 }
 
-BOOL cmd_LoadFullConsoleData(CESERVER_REQ& in, CESERVER_REQ** out)
+namespace {
+// hOutput - our console output handle
+// max_height - 0 for unlimited, >0 for detected dynamic height
+BOOL LoadFullConsoleData(HANDLE hOutput, WORD max_height, CESERVER_REQ** out)
 {
 	BOOL lbRc = FALSE;
-	//DWORD nPrevAltServer = 0;
-
-	// В Win7 закрытие дескриптора в ДРУГОМ процессе - закрывает консольный буфер ПОЛНОСТЬЮ!!!
-	// В итоге, буфер вывода telnet'а схлопывается!
-	if (gpSrv->bReopenHandleAllowed)
-	{
-		ConOutCloseHandle();
-	}
-
-	// Need to block all requests to output buffer in other threads
-	MSectionLockSimple csRead; csRead.Lock(&gpSrv->csReadConsoleInfo, LOCK_READOUTPUT_TIMEOUT);
 
 	CONSOLE_SCREEN_BUFFER_INFO lsbi = {{0,0}};
 	// !!! Нас интересует реальное положение дел в консоли,
 	//     а не скорректированное функцией MyGetConsoleScreenBufferInfo
-	if (!GetConsoleScreenBufferInfo(ghConOut, &lsbi))
+	if (!GetConsoleScreenBufferInfo(hOutput, &lsbi))
 	{
-		//CS.RelockExclusive();
-		//SafeFree(gpStoredOutput);
 		return FALSE; // Не смогли получить информацию о консоли...
+	}
+	// Support dynamic height - do not load all 32K lines
+	if (max_height && (static_cast<WORD>(lsbi.dwSize.Y) > max_height))
+	{
+		lsbi.dwSize.Y = max_height;
 	}
 
 	CESERVER_CONSAVE_MAP* pData = NULL;
@@ -1782,7 +1780,7 @@ BOOL cmd_LoadFullConsoleData(CESERVER_REQ& in, CESERVER_REQ** out)
 		COORD BufSize = {lsbi.dwSize.X, lsbi.dwSize.Y};
 		SMALL_RECT ReadRect = {0, 0, lsbi.dwSize.X-1, lsbi.dwSize.Y-1};
 
-		lbRc = MyReadConsoleOutput(ghConOut, pData->Data, BufSize, ReadRect);
+		lbRc = MyReadConsoleOutput(hOutput, pData->Data, BufSize, ReadRect);
 
 		if (lbRc)
 		{
@@ -1794,7 +1792,7 @@ BOOL cmd_LoadFullConsoleData(CESERVER_REQ& in, CESERVER_REQ** out)
 			// Еще раз считать информацию по консоли (курсор положение и прочее...)
 			// За время чтения данных - они могли прокрутиться вверх
 			CONSOLE_SCREEN_BUFFER_INFO lsbi2 = {{0,0}};
-			if (GetConsoleScreenBufferInfo(ghConOut, &lsbi2))
+			if (GetConsoleScreenBufferInfo(hOutput, &lsbi2))
 			{
 				// Обновим только курсор, а то юзер может получить черный экран, вместо ожидаемого текста
 				// Если во время "dir c:\ /s" запросить AltConsole - получаем черный экран.
@@ -1807,6 +1805,65 @@ BOOL cmd_LoadFullConsoleData(CESERVER_REQ& in, CESERVER_REQ** out)
 	}
 
 	return lbRc;
+}
+
+BOOL LoadConsoleMapData(CESERVER_REQ** out)
+{
+	BOOL lbRc = FALSE;
+	CONSOLE_SCREEN_BUFFER_INFO lsbi = {{0,0}};
+	CESERVER_CONSAVE_MAPHDR* pMapHdr = NULL;
+	CESERVER_CONSAVE_MAP* pMapData = NULL;
+	if (!CmdOutputOpenMap(lsbi, pMapHdr, pMapData))
+		return FALSE;
+	// #AltBuffer try to detect max used row
+	const size_t max_cells = std::min<DWORD>(lsbi.dwSize.X * lsbi.dwSize.Y, pMapData->MaxCellCount);
+	const size_t max_cells_cb = (max_cells * sizeof(pMapData->Data[0]));
+	const size_t cbReplySize = sizeof(CESERVER_CONSAVE_MAP) + max_cells_cb;
+	*out = ExecuteNewCmd(CECMD_CONSOLEFULL, cbReplySize);
+
+	if ((*out) != NULL)
+	{
+		auto pData = (CESERVER_CONSAVE_MAP*)*out;
+		pData->info = lsbi;
+		pData->Succeeded = lbRc;
+		pData->MaxCellCount = lsbi.dwSize.X * lsbi.dwSize.Y;
+		pData->CurrentIndex = pMapData->CurrentIndex;
+		memmove_s(pData->Data, max_cells_cb, pMapData->Data, max_cells_cb);
+		lbRc = TRUE;
+	}
+	return lbRc;
+}
+
+BOOL LoadFullConsoleDataReal(CESERVER_REQ& in, CESERVER_REQ** out)
+{
+	BOOL lbRc = FALSE;
+
+	// В Win7 закрытие дескриптора в ДРУГОМ процессе - закрывает консольный буфер ПОЛНОСТЬЮ!!!
+	// В итоге, буфер вывода telnet'а схлопывается!
+	if (isReopenHandleAllowed())
+	{
+		ConOutCloseHandle();
+	}
+
+	return LoadFullConsoleData(ghConOut, (in.DataSize() >= sizeof(DWORD)) ? LOWORD(in.dwData[0]) : 0, out);
+}
+}  // namespace
+
+BOOL cmd_LoadFullConsoleData(CESERVER_REQ& in, CESERVER_REQ** out)
+{
+	// Need to block all requests to output buffer in other threads
+	MSectionLockSimple csRead; csRead.Lock(&gpSrv->csReadConsoleInfo, LOCK_READOUTPUT_TIMEOUT);
+
+	BOOL alt_screen = (in.DataSize() >= 2 * sizeof(DWORD)) ? in.dwData[1] : FALSE;
+	if (!alt_screen)
+		return LoadFullConsoleDataReal(in, out);
+	else if (gPrimaryBuffer.HasHandle())
+		return LoadFullConsoleData(gPrimaryBuffer, gnPrimaryBufferLastRow, out);
+	else //if (!isReopenHandleAllowed())
+		return LoadConsoleMapData(out);
+
+	_ASSERTE(FALSE && "Unsupported retrieve mode!");
+	return FALSE;
 }
 
 BOOL cmd_SetFullScreen(CESERVER_REQ& in, CESERVER_REQ** out)
@@ -1966,6 +2023,7 @@ BOOL cmd_SetConColors(CESERVER_REQ& in, CESERVER_REQ** out)
 		{
 			// Считать из консоли текущие атрибуты (построчно/поблочно)
 			// И там, где они совпадают с OldText - заменить на in.SetConColor.NewTextAttributes
+			// #Refill Pass current DynamicHeight into
 			RefillConsoleAttributes(csbi5, OldText, in.SetConColor.NewTextAttributes);
 		}
 
@@ -2006,11 +2064,15 @@ BOOL cmd_AltBuffer(CESERVER_REQ& in, CESERVER_REQ** out)
 	CONSOLE_SCREEN_BUFFER_INFO lsbi = {};
 
 	// Need to block all requests to output buffer in other threads
-	MSectionLockSimple csRead; csRead.Lock(&gpSrv->csReadConsoleInfo, LOCK_READOUTPUT_TIMEOUT);
-
+	MSectionLockSimple csRead;
+	if (!csRead.Lock(&gpSrv->csReadConsoleInfo, LOCK_READOUTPUT_TIMEOUT))
+	{
+		LogString("cmd_AltBuffer: csReadConsoleInfo.Lock failed");
+		lbRc = FALSE;
+	}
 	// !!! Нас интересует реальное положение дел в консоли,
 	//     а не скорректированное функцией MyGetConsoleScreenBufferInfo
-	if (!GetConsoleScreenBufferInfo(ghConOut, &lsbi))
+	else if (!GetConsoleScreenBufferInfo(ghConOut, &lsbi))
 	{
 		LogString("cmd_AltBuffer: GetConsoleScreenBufferInfo failed");
 		lbRc = FALSE;
@@ -2030,28 +2092,24 @@ BOOL cmd_AltBuffer(CESERVER_REQ& in, CESERVER_REQ** out)
 			LogString(szInfo);
 		}
 
-
-		if (in.AltBuf.AbFlags & abf_SaveContents)
-		{
-			CmdOutputStore();
-		}
-
-
+		//do resize of the active screeen buffer (as usual)
 		//cmd_SetSizeXXX_CmdStartedFinished(CESERVER_REQ& in, CESERVER_REQ** out)
 		//CECMD_SETSIZESYNC
-		if (in.AltBuf.AbFlags & (abf_BufferOn|abf_BufferOff))
+		auto do_resize_buffer = [&in, &lsbi, &csRead]()
 		{
+			bool lbRc = true;
 			CESERVER_REQ* pSizeOut = NULL;
-			CESERVER_REQ* pSizeIn = ExecuteNewCmd(CECMD_SETSIZESYNC, sizeof(CESERVER_REQ_HDR)+sizeof(CESERVER_REQ_SETSIZE));
+			CESERVER_REQ* pSizeIn = ExecuteNewCmd(CECMD_SETSIZESYNC, sizeof(CESERVER_REQ_HDR) + sizeof(CESERVER_REQ_SETSIZE));
 			if (!pSizeIn)
 			{
-				lbRc = FALSE;
+				lbRc = false;
 			}
 			else
 			{
 				pSizeIn->hdr = in.hdr; // Как-бы фиктивно пришло из приложения
 				pSizeIn->hdr.nCmd = CECMD_SETSIZESYNC;
-				pSizeIn->hdr.cbSize = sizeof(CESERVER_REQ_HDR)+sizeof(CESERVER_REQ_SETSIZE);
+				// we have to restore proper size, reverted two lines above
+				pSizeIn->hdr.cbSize = (sizeof(CESERVER_REQ_HDR) + sizeof(CESERVER_REQ_SETSIZE));
 
 				//pSizeIn->SetSize.rcWindow.Left = pSizeIn->SetSize.rcWindow.Top = 0;
 				//pSizeIn->SetSize.rcWindow.Right = lsbi.srWindow.Right - lsbi.srWindow.Left;
@@ -2074,7 +2132,7 @@ BOOL cmd_AltBuffer(CESERVER_REQ& in, CESERVER_REQ** out)
 
 				if (!cmd_SetSizeXXX_CmdStartedFinished(*pSizeIn, &pSizeOut))
 				{
-					lbRc = FALSE;
+					lbRc = false;
 				}
 				else
 				{
@@ -2085,12 +2143,73 @@ BOOL cmd_AltBuffer(CESERVER_REQ& in, CESERVER_REQ** out)
 				ExecuteFreeResult(pSizeIn);
 				ExecuteFreeResult(pSizeOut);
 			}
-		}
+			return lbRc;
+		};
 
-
-		if (in.AltBuf.AbFlags & abf_RestoreContents)
+		// In Windows 7 we have to use legacy mode
+		if (!isReopenHandleAllowed()
+			|| !(in.AltBuf.AbFlags & abf_Connector))
 		{
-			CmdOutputRestore(true/*Simple*/);
+			if (in.AltBuf.AbFlags & abf_SaveContents)
+				CmdOutputStore();
+			if (in.AltBuf.AbFlags & (abf_BufferOn|abf_BufferOff))
+				lbRc = do_resize_buffer();
+			if (in.AltBuf.AbFlags & abf_RestoreContents)
+				CmdOutputRestore(true/*Simple*/);
+		}
+		// Switch console buffer handles
+		else if (in.AltBuf.AbFlags & (abf_SaveContents|abf_RestoreContents))
+		{
+			static bool alt_buffer_set = false;
+			_ASSERTE(!!(in.AltBuf.AbFlags & abf_BufferOff) == !!(in.AltBuf.AbFlags & abf_SaveContents));
+			_ASSERTE(!!(in.AltBuf.AbFlags & abf_BufferOn) == !!(in.AltBuf.AbFlags & abf_RestoreContents));
+			_ASSERTE(!!(in.AltBuf.AbFlags & abf_BufferOff) != !!(in.AltBuf.AbFlags & abf_BufferOn));
+
+			if ((in.AltBuf.AbFlags & abf_BufferOff) && !alt_buffer_set)
+			{
+				SECURITY_ATTRIBUTES sec = {sizeof(sec), nullptr, TRUE};
+				if (gPrimaryBuffer.SetHandle(::GetStdHandle(STD_OUTPUT_HANDLE), MConHandle::StdMode::Output)
+					&& gAltBuffer.SetHandle(::CreateConsoleScreenBuffer(
+						GENERIC_READ|GENERIC_WRITE, FILE_SHARE_READ|FILE_SHARE_WRITE, &sec, CONSOLE_TEXTMODE_BUFFER, nullptr)
+						, MConHandle::StdMode::None)
+					&& SetConsoleActiveScreenBuffer(gAltBuffer)
+					)
+				{
+					ghConOut.SetHandlePtr(gAltBuffer);
+					if ((lbRc = do_resize_buffer()))
+					{
+						gnPrimaryBufferLastRow = in.AltBuf.BufferHeight;
+						alt_buffer_set = true;
+					}
+					else
+					{
+						SetConsoleActiveScreenBuffer(gPrimaryBuffer);
+						ghConOut.SetHandlePtr(nullptr);
+						gPrimaryBuffer.Close();
+						gAltBuffer.Close();
+					}
+				}
+				else
+				{
+					gPrimaryBuffer.Close();
+					gAltBuffer.Close();
+				}
+			}
+			else if ((in.AltBuf.AbFlags & abf_BufferOn) && alt_buffer_set)
+			{
+				SetConsoleActiveScreenBuffer(gPrimaryBuffer);
+				ghConOut.SetHandlePtr(nullptr);
+				gPrimaryBuffer.Close();
+				gAltBuffer.Close();
+				alt_buffer_set = false;
+				gnPrimaryBufferLastRow = 0;
+				lbRc = do_resize_buffer();
+			}
+		}
+		// Only buffer height change was requested
+		else if (in.AltBuf.AbFlags & (abf_BufferOn|abf_BufferOff))
+		{
+			lbRc = do_resize_buffer();
 		}
 	}
 
@@ -2558,6 +2677,12 @@ BOOL cmd_StartXTerm(CESERVER_REQ& in, CESERVER_REQ** out)
 	if (in.DataSize() >= 3*sizeof(DWORD))
 	{
 		gpSrv->processes->StartStopXTermMode((TermModeCommand)in.dwData[0], in.dwData[1], in.dwData[2]);
+
+		if (in.DataSize() >= 4*sizeof(DWORD))
+		{
+			gpSrv->pConsole->hdr.stdConBlockingPID = in.dwData[3];
+			UpdateConsoleMapHeader(L"CECMD_STARTXTERM");
+		}
 	}
 
 	// Inform the GUI
@@ -2565,6 +2690,30 @@ BOOL cmd_StartXTerm(CESERVER_REQ& in, CESERVER_REQ** out)
 	ExecuteFreeResult(pGuiOut);
 
 	*out = ExecuteNewCmd(CECMD_STARTXTERM, sizeof(CESERVER_REQ_HDR));
+	lbRc = ((*out) != NULL);
+	return lbRc;
+}
+
+BOOL cmd_StartPtySrv(CESERVER_REQ& in, CESERVER_REQ** out)
+{
+	BOOL lbRc = TRUE;
+
+	LogString("CECMD_STARTPTYSRV");
+
+	if (in.DataSize() >= sizeof(CESERVER_REQ::Data[0]) && in.Data[0] == TRUE)
+	{
+		auto handles = SrvAnsi::Object()->GetClientHandles(in.hdr.nSrcPID);
+		if ((*out = ExecuteNewCmd(CECMD_STARTPTYSRV, sizeof(CESERVER_REQ_HDR) + 2*sizeof(CESERVER_REQ::qwData[0]))))
+		{
+			(*out)->qwData[0] = uint64_t(handles.first);
+			(*out)->qwData[1] = uint64_t(handles.second);
+		}
+	}
+	else
+	{
+		*out = ExecuteNewCmd(CECMD_STARTPTYSRV, sizeof(CESERVER_REQ_HDR));
+	}
+
 	lbRc = ((*out) != NULL);
 	return lbRc;
 }
@@ -2777,6 +2926,10 @@ BOOL ProcessSrvCommand(CESERVER_REQ& in, CESERVER_REQ** out)
 		case CECMD_FINDNEXTROWID:
 		{
 			lbRc = cmd_FindNextRowId(in, out);
+		} break;
+		case CECMD_STARTPTYSRV:
+		{
+			lbRc = cmd_StartPtySrv(in, out);
 		} break;
 		default:
 		{

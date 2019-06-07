@@ -34,11 +34,13 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "LoadImg.h"
 #include "VirtualConsole.h"
 #include "../common/CmdLine.h"
+#include "../common/EnvVar.h"
 #include "../common/MSection.h"
 
 CBackground::CBackground()
 {
 	bgSize = MakeCoord(-1,-1);
+	VConOffset = {};
 	hBgDc = NULL;
 	hBgBitmap = NULL;
 	hOldBitmap = NULL;
@@ -756,7 +758,6 @@ bool CBackground::PrepareBackground(CVirtualConsole* pVCon, HDC&/*OUT*/ phBgDc, 
 		}
 	}
 
-	LONG lMaxBgWidth = 0, lMaxBgHeight = 0;
 	bool bIsForeground = gpConEmu->isMeForeground(true);
 
 
@@ -774,6 +775,7 @@ bool CBackground::PrepareBackground(CVirtualConsole* pVCon, HDC&/*OUT*/ phBgDc, 
 		return gpSetCls->PrepareBackground(pVCon, &phBgDc, &pbgBmpSize);
 		#else
 
+		LONG lMaxBgWidth = 0, lMaxBgHeight = 0;
 		CBackgroundInfo* pBgFile = pVCon->GetBackgroundObject();
 		if (!pBgFile)
 		{
@@ -986,12 +988,6 @@ bool CBackground::PrepareBackground(CVirtualConsole* pVCon, HDC&/*OUT*/ phBgDc, 
 			mb_BgLastFade = (!bIsForeground && gpSet->isFadeInactive);
 			TODO("Переделать, ориентироваться только на размер картинки - неправильно");
 			TODO("DoubleView - скорректировать X,Y");
-
-			if (lMaxBgWidth && lMaxBgHeight)
-			{
-				lBgWidth = lMaxBgWidth;
-				lBgHeight = lMaxBgHeight;
-			}
 
 			if (!CreateField(lBgWidth, lBgHeight) ||
 				!PutPluginBackgroundImage(0,0, lBgWidth, lBgHeight))

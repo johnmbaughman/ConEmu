@@ -31,21 +31,21 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "Header.h"
 #include <commctrl.h>
-#pragma warning(disable: 4091)
-#include <shlobj.h>
+#include "../common/shlobj.h"
 #include <exdisp.h>
-#pragma warning(default: 4091)
 #include <tlhelp32.h>
 #if !defined(__GNUC__) || defined(__MINGW32__)
+#pragma warning(push)
 #pragma warning(disable: 4091)
 #include <dbghelp.h>
-#pragma warning(default: 4091)
+#pragma warning(pop)
 #include <shobjidl.h>
 #include <propkey.h>
 #else
 #include "../common/DbgHlpGcc.h"
 #endif
 #include "../common/ConEmuCheck.h"
+#include "../common/EnvVar.h"
 #include "../common/MBSTR.h"
 #include "../common/MSetter.h"
 #include "../common/MStrEsc.h"
@@ -1946,21 +1946,21 @@ static HRESULT _CreateShellLink(PCWSTR pszArguments, PCWSTR pszPrefix, PCWSTR ps
 			hr = psl->SetPath(szAppPath);
 
 			// Иконка
-			CEStr szTmp;
+			CmdArg szTmp;
 			CEStr szIcon; int iIcon = 0;
 			CEStr szBatch;
 			LPCWSTR pszTemp = pszArguments;
 			LPCWSTR pszIcon = NULL;
 			RConStartArgsEx args;
 
-			while (NextArg(&pszTemp, szTmp) == 0)
+			while ((pszTemp = NextArg(pszTemp, szTmp)))
 			{
 				if (szTmp.ms_Val[0] == L'/')
 					szTmp.ms_Val[0] = L'-';
 
 				if (szTmp.IsSwitch(L"-icon"))
 				{
-					if (NextArg(&pszTemp, szTmp) == 0)
+					if ((pszTemp = NextArg(pszTemp, szTmp)))
 						pszIcon = szTmp;
 					break;
 				}
@@ -1993,7 +1993,7 @@ static HRESULT _CreateShellLink(PCWSTR pszArguments, PCWSTR pszPrefix, PCWSTR ps
 					if (!pszIcon)
 					{
 						szTmp.Empty();
-						if (NextArg(&pszTemp, szTmp) == 0)
+						if ((pszTemp = NextArg(pszTemp, szTmp)))
 							pszIcon = szTmp;
 					}
 					break;
@@ -2649,7 +2649,7 @@ int CheckZoneIdentifiers(bool abAutoUnblock)
 	LPCWSTR pszFrom = szZonedFiles.ms_Val;
 	CEStr lsFile;
 	bool bFirstRunAs = true;
-	while (0 == NextLine(&pszFrom, lsFile))
+	while ((pszFrom = NextLine(pszFrom, lsFile)))
 	{
 		if (!DropZoneIdentifier(lsFile, nErrCode))
 		{
@@ -2744,8 +2744,8 @@ int ProcessCmdArg(LPCWSTR cmdNew, bool isScript, bool isBare, CEStr& szReady, bo
 			// Then if user drops, for example, txt file on the ConEmu's icon,
 			// we may concatenate this argument with Far command line.
 			pszDefCmd = gpSet->psStartSingleApp;
-			CEStr szExe;
-			if (0 != NextArg(&pszDefCmd, szExe))
+			CmdArg szExe;
+			if (!NextArg(pszDefCmd, szExe))
 			{
 				_ASSERTE(FALSE && "NextArg failed");
 			}
@@ -2835,11 +2835,11 @@ int CheckForDebugArgs(LPCWSTR asCmdLine)
 	#endif
 
 	LPCWSTR pszCmd = asCmdLine;
-	CEStr lsArg;
+	CmdArg lsArg;
 	// First argument (actually, first would be our executable in most cases)
 	for (int i = 0; i <= 1; i++)
 	{
-		if (NextArg(&pszCmd, lsArg) != 0)
+		if (!(pszCmd = NextArg(pszCmd, lsArg)))
 			break;
 		// Support both notations
 		if (lsArg.ms_Val[0] == L'/') lsArg.ms_Val[0] = L'-';
@@ -3148,9 +3148,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	// params == (uint)-1, если первый аргумент не начинается с '/'
 	if (!gpConEmu->opt.runCommand.IsEmpty() && (gpConEmu->opt.params == -1))
 	{
-		CEStr szPath;
+		CmdArg szPath;
 		LPCWSTR pszCmdLine = gpConEmu->opt.runCommand;
-		if (0 == NextArg(&pszCmdLine, szPath))
+		if ((pszCmdLine = NextArg(pszCmdLine, szPath)))
 		{
 			if (CConEmuUpdate::IsUpdatePackage(szPath))
 			{
@@ -3205,6 +3205,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	if (gpConEmu->opt.AnsiLogPath.GetStr())
 	{
 		gpSet->isAnsiLog = true;
+		gpSet->isAnsiLogCodes = true;
 		SafeFree(gpSet->pszAnsiLog);
 		gpSet->pszAnsiLog = lstrdup(gpConEmu->opt.AnsiLogPath.GetStr());
 	}
@@ -3596,7 +3597,7 @@ done:
 	ShutdownGuiStep(L"Gui terminated");
 
 wrap:
-	// HeapDeinitialize() - Нельзя. Еще живут глобальные объекты
+	HeapDeinitialize();
 	DEBUGSTRSTARTUP(L"WinMain exit");
 	// If TerminateThread was called at least once,
 	// normal process shutdown may hang

@@ -34,7 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 	L"Command line examples\r\n" \
 	VCGCCTEST(L"––––––––––––––––––––––\r\n",L"----------------------\r\n") \
 	L"ConEmu.exe -run Far.exe -w\r\n" \
-	L"ConEmu.exe -font \"Consolas\" -size 16 -bufferheight 32766 -run powershell\r\n" \
+	L"ConEmu.exe -font \"Consolas\" -FontSize 16 -bufferheight 32766 -run powershell\r\n" \
 	L"ConEmu.exe -config \"Hiew\" -run \"C:\\Tools\\HIEW32.EXE\"\r\n" \
 	L"ConEmu.exe -run {Shells}\r\n" \
 	L"ConEmu.exe -nosingle -runlist cmd ||| cmd -new_console:sV ||| cmd -new_console:sH\r\n" \
@@ -59,8 +59,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 	L"-Single - New console will be started in new tab of existing ConEmu.\r\n" \
 	L"-NoSingle - Force new ConEmu window even if single mode is selected in the Settings.\r\n" \
 	L"-ShowHide | -ShowHideTSA - Works like \"Minimize/Restore\" global hotkey.\r\n" \
+	L"-NoAutoEnvReload - Disable auto reload of environment variables from registry.\r\n" \
 	L"-NoCascade - Disable ‘Cascade’ option may be set in the Settings.\r\n" \
 	L"-NoDefTerm - Don't start initialization procedure for setting up ConEmu as default terminal.\r\n" \
+	L"-NoHooksWarn - Don't show ‘hooks are detected’ warning in console.\r\n" \
 	L"-NoKeyHooks - Disable SetWindowsHookEx and global hotkeys.\r\n" \
 	L"-NoMacro - Disable GuiMacro hotkeys.\r\n" \
 	L"-NoHotkey - Disable all hotkeys.\r\n" \
@@ -69,7 +71,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 	L"-NoCloseConfirm - Disable confirmation of ConEmu's window closing\r\n" \
 	L"-CT[0|1] - Anti-aliasing: -ct0 - off, -ct1 - standard, -ct - cleartype.\r\n" \
 	L"-Font <fontname> - Specify the font name.\r\n" \
-	L"-Size <fontsize> - Specify the font size.\r\n" \
+	L"-FontSize <fontsize> - Specify the font size.\r\n" \
 	L"-FontFile <fontfilename> - Loads font from file (multiple pairs allowed).\r\n" \
 	L"-FontDir <fontfolder> - Loads all fonts from folder (multiple pairs allowed).\r\n" \
 	L"-BufferHeight <lines> - Set console buffer height.\r\n" \
@@ -78,6 +80,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 	L"-Frame <value> - Set custom ‘Frame width’.\r\n" \
 	L"-Monitor <1 | x10001 | \"\\\\.\\DISPLAY1\"> - Place window on the specified monitor.\r\n" \
 	L"-Palette <name> - Choose named color palette.\r\n" \
+	L"-Theme [<name>] - Use specified Windows theme or ‘DarkMode_Explorer’.\r\n" \
 	L"-Log[1|2] - Used to create debug log files.\r\n" \
 	L"-Demote -run <command> - Run command de-elevated.\r\n" \
 	L"-Bypass -run <command> - Just execute the command detached.\r\n" \
@@ -257,6 +260,11 @@ _DBGHLP(L"-ZoneId - Try to drop :Zone.Identifier without confirmation.\r\n") \
 	L"Detach([<Flags>])\r\n" \
 	L"  - Detach active RealConsole from ConEmu\r\n" \
 	L"    Flags=1: don't show confirm message\r\n" \
+	L"EnvironmentReload\r\n" \
+	L"  - Reload environment variables from system registry\r\n" \
+	L"EnvironmentList\r\n" \
+	L"  - Print actual `name=value` environment pairs\r\n" \
+	L"    Variables from ConEmu settings go after system ones\r\n" \
 	L"FindEditor(\"<FullEditFileName>\")\r\n" \
 	L"FindViewer(\"<FullViewerFileName>\")\r\n" \
 	L"FindFarWindow(<WindowType>,\"<WindowTitle>\")\r\n" \
@@ -385,6 +393,7 @@ _DBGHLP(L"-ZoneId - Try to drop :Zone.Identifier without confirmation.\r\n") \
 	L"     DX: select text horizontally: -1/+1\r\n" \
 	L"     DY: select text vertically: -1/+1\r\n" \
 	L"     HE: to-home(-1)/to-end(+1) with text selection\r\n" \
+	L"     HE: word-left(-2)/word-right(+2) with text selection\r\n" \
 	L"Select(2)\r\n" \
 	L"  - Use to stop selection\r\n" \
 	L"SetDpi(<DPI>)\r\n" \
@@ -447,7 +456,7 @@ _DBGHLP(L"-ZoneId - Try to drop :Zone.Identifier without confirmation.\r\n") \
 	L"     Cmd==4: switch tab direct (no recent mode), Parm=(1,-1)\r\n" \
 	L"     Cmd==5: switch tab recent, Parm=(1,-1)\r\n" \
 	L"     Cmd==6: switch console direct (no recent mode), Parm=(1,-1)\r\n" \
-	L"     Cmd==7: activate console by number, Parm=(1-based console index)\r\n" \
+	L"     Cmd==7: activate console by number, Parm=(1-based console index or -1 for last tab)\r\n" \
 	L"     Cmd==8: show tabs list menu (indiffirent Far/Not Far)\r\n" \
 	L"     Cmd==9: close active tab, same as Close(3)\r\n" \
 	L"     Cmd==10: switches visible split-panes, Parm=(1,-1)\r\n" \

@@ -51,6 +51,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //#include "../common/ConEmuCheck.h"
 
 #include "../common/execute.h"
+#include "../common/EnvVar.h"
 #include "../common/md5.h"
 #include "../common/MArray.h"
 #include "../common/MFileLogEx.h"
@@ -92,6 +93,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "SetPgDebug.h"
 #include "SetPgInfo.h"
 #include "Status.h"
+#include "SystemEnvironment.h"
 #include "TabBar.h"
 #include "TrayIcon.h"
 #include "Update.h"
@@ -130,6 +132,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define DEBUGSTRDPI(s) DEBUGSTR(s)
 #define DEBUGSTRNOLOG(s) //DEBUGSTR(s)
 #define DEBUGSTRDESTROY(s) DEBUGSTR(s)
+#define DEBUGSTRSETCHANGE(s) DEBUGSTR(s)
 #ifdef _DEBUG
 //#define DEBUGSHOWFOCUS(s) DEBUGSTR(s)
 #endif
@@ -385,6 +388,8 @@ CConEmuMain::CConEmuMain()
 		}
 	}
 
+	saved_environment_ = std::make_shared<SystemEnvironment>();
+	saved_environment_->LoadFromRegistry();
 
 	// Load current comspec form registry
 	HKEY hk;
@@ -540,7 +545,7 @@ CConEmuMain::CConEmuMain()
 	}
 	NonPortable:
 
-	ZeroStruct(m_DbgInfo);
+	m_DbgInfo = {};
 	if (IsDebuggerPresent())
 	{
 		wchar_t szDebuggers[32];
@@ -619,7 +624,7 @@ CConEmuMain::CConEmuMain()
 
 
 	// DosBox (the only available way to run legacy Dos-applications in 64-bit OS)
-	mb_DosBoxExists = CheckDosBoxExists();
+	CheckDosBoxExists();
 
 	CFrameHolder::InitFrameHolder();
 }
@@ -1302,12 +1307,12 @@ LPCWSTR CConEmuMain::ConEmuCExeFull(LPCWSTR asCmdLine/*=NULL*/)
 
 		// Проверить битность asCmdLine во избежание лишних запусков серверов для Inject
 		// и корректной битности запускаемого процессора по настройке
-		CEStr szTemp;
+		CmdArg szTemp;
 		wchar_t* pszExpand = NULL;
 		if (!FileExists(asCmdLine))
 		{
 			const wchar_t *psz = asCmdLine;
-			if (NextArg(&psz, szTemp) == 0)
+			if ((psz = NextArg(psz, szTemp)))
 				asCmdLine = szTemp;
 		}
 		else
@@ -1646,14 +1651,11 @@ void CConEmuMain::OnUseDwm(bool abEnableDwm)
 	//CheckMenuItem(GetSysMenu(false), ID_ISDWM, MF_BYCOMMAND | (abEnableDwm ? MF_CHECKED : MF_UNCHECKED));
 }
 
-bool CConEmuMain::isTabsShown()
+bool CConEmuMain::isTabsShown() const
 {
 	if (gpSet->isTabs == 1)
 		return true;
-	// #SIZE_TODO May be not precise
-	if (mp_TabBar && mp_TabBar->IsTabsShown())
-		return true;
-	return false;
+	return (mp_TabBar && mp_TabBar->IsTabsActive());
 }
 
 void CConEmuMain::SetWindowStyle(DWORD anStyle)
@@ -1717,34 +1719,21 @@ DWORD CConEmuMain::FixWindowStyle(DWORD dwStyle, ConEmuWindowMode wmNewMode /*= 
 		dwStyle &= ~(WS_CAPTION|WS_THICKFRAME);
 		dwStyle |= WS_CHILD|WS_SYSMENU;
 	}
-	else if (gpConEmu->isCaptionHidden(wmNewMode))
+	else if (isCaptionHidden(wmNewMode))
 	{
 		dwStyle &= ~WS_CAPTION;
 
-		bool noThickFrame = false;
-			// NO frame in FullScreen at all
-		if ((wmNewMode == wmFullScreen)
-			// mb_DisableThickFrame - to eliminate glitches during quake animation
-			|| (mb_DisableThickFrame))
-		{
-			noThickFrame = true;
-		}
-			// gh-1539: Bypass Windows problem with region and hidden taskbar
-		else if ((wmNewMode == wmMaximized) && isCaptionHidden())
-		{
-			auto mi = NearestMonitorInfo(NULL);
-			if (mi.isTaskbarHidden)
-			{
-				noThickFrame = true;
-			}
-		}
+		const bool noThickFrame = isSelfFrame(wmNewMode)
+			|| mb_DisableThickFrame  // eliminate glitches during quake animation
+			;
 
 		if (noThickFrame)
 		{
 			dwStyle &= ~(WS_THICKFRAME);
 		}
+
 		// m_ForceShowFrame - to bypass strange MS limitation "not resizing borderless windows with WS_SYSMENU"
-		else if (m_ForceShowFrame == fsf_Show)
+		if (m_ForceShowFrame == fsf_Show)
 		{
 			dwStyle &= ~(WS_THICKFRAME|WS_SYSMENU);
 		}
@@ -1752,11 +1741,12 @@ DWORD CConEmuMain::FixWindowStyle(DWORD dwStyle, ConEmuWindowMode wmNewMode /*= 
 		// in favor of borderless or self-drawn-border window
 		else if (gpSet->HideCaptionAlwaysFrame() >= 0)
 		{
+			_ASSERTE(!(dwStyle & WS_THICKFRAME)); // should already be cleared, just ensure...
 			dwStyle &= ~(WS_THICKFRAME); // remove standard (DWM) frame and shadows
 			dwStyle |= (WS_SYSMENU); // but allow system menu!
 		}
 		// Normal mode for caption-less window, allow resize using standard (DWM) frame
-		else
+		else if (!noThickFrame)
 		{
 			dwStyle |= (WS_THICKFRAME|WS_SYSMENU);
 		}
@@ -2065,7 +2055,6 @@ BOOL CConEmuMain::CreateMainWindow()
 		return FALSE;
 	}
 
-
 	// If created style differs from required?
 	DWORD dwStyle = GetWindowLong(ghWnd, GWL_STYLE);
 	DWORD dwNewStyle = FixWindowStyle(dwStyle, WindowMode);
@@ -2147,21 +2136,21 @@ void CConEmuMain::FillConEmuMainFont(ConEmuMainFont* pFont)
 }
 
 
-BOOL CConEmuMain::CheckDosBoxExists()
+bool CConEmuMain::CheckDosBoxExists()
 {
-	BOOL lbExists = FALSE;
-	wchar_t szDosBoxPath[MAX_PATH+32];
-	wcscpy_c(szDosBoxPath, ms_ConEmuBaseDir);
-	wchar_t* pszName = szDosBoxPath+_tcslen(szDosBoxPath);
+	bool absent = false;
 
-	wcscpy_add(pszName, szDosBoxPath, L"\\DosBox\\DosBox.exe");
-	if (FileExists(szDosBoxPath))
+	const wchar_t* reqFiles[] = { L"DosBox.exe", L"DosBox.conf" };
+	for (size_t i = 0; i < countof(reqFiles); ++i)
 	{
-		wcscpy_add(pszName, szDosBoxPath, L"\\DosBox\\DosBox.conf");
-		lbExists = FileExists(szDosBoxPath);
+		CEStr file(ms_ConEmuBaseDir, L"\\DosBox\\", reqFiles[i]);
+		if (!FileExists(file))
+		{
+			absent = true; break;
+		}
 	}
 
-	return lbExists;
+	return (mb_DosBoxExists = !absent);
 }
 
 void CConEmuMain::GetComSpecCopy(ConEmuComspec& ComSpec)
@@ -2236,8 +2225,7 @@ void CConEmuMain::UpdateGuiInfoMapping()
 	// m_GuiInfo.Flags[CECF_SleepInBackg], m_GuiInfo.hActiveCons, m_GuiInfo.dwActiveTick, m_GuiInfo.bGuiActive
 	UpdateGuiInfoMappingActive(isMeForeground(true, true), false);
 
-	mb_DosBoxExists = CheckDosBoxExists();
-	SetConEmuFlags(m_GuiInfo.Flags,CECF_DosBox,(mb_DosBoxExists ? CECF_DosBox : 0));
+	SetConEmuFlags(m_GuiInfo.Flags,CECF_DosBox,(CheckDosBoxExists() ? CECF_DosBox : 0));
 
 	wcscpy_c(m_GuiInfo.sConEmuExe, ms_ConEmuExe);
 	//-- переехали в m_GuiInfo.ComSpec
@@ -2312,8 +2300,8 @@ void CConEmuMain::UpdateGuiInfoMapping()
 			}
 			else
 			{
-				if (csType == cst_Explicit)
-					csType = cst_AutoTccCmd;
+				_ASSERTE(csType == cst_Explicit);
+				csType = cst_AutoTccCmd;
 				m_GuiInfo.ComSpec.ComspecExplicit[0] = 0;
 			}
 		}
@@ -2816,7 +2804,7 @@ void CConEmuMain::ForceShowTabs(BOOL abShow)
 	//2009-05-20 Раз это Force - значит на возможность получить табы из фара забиваем! Для консоли показывается "Console"
 	BOOL lbTabsAllowed = abShow /*&& this->mp_TabBar->IsAllowed()*/;
 
-	if (abShow && !this->mp_TabBar->IsTabsShown() && gpSet->isTabs && lbTabsAllowed)
+	if (abShow && gpSet->isTabs && lbTabsAllowed)
 	{
 		this->mp_TabBar->Activate(TRUE);
 		this->mp_TabBar->Update();
@@ -3106,7 +3094,7 @@ bool CConEmuMain::ConActivateNext(bool abNext)
 	return CVConGroup::ConActivateNext(abNext);
 }
 
-// nCon - zero-based index of console
+// nCon - zero-based index of console; -1 for last console
 bool CConEmuMain::ConActivate(int nCon)
 {
 	return CVConGroup::ConActivate(nCon);
@@ -3299,9 +3287,9 @@ LPCWSTR CConEmuMain::ParseScriptLineOptions(LPCWSTR apszLine, bool* rpbSetActive
 	if (apszLine && *apszLine)
 	{
 		LPCWSTR pcszCmd = apszLine;
-		CEStr szArg;
+		CmdArg szArg;
 		const int iNewConLen = lstrlen(L"-new_console");
-		while (NextArg(&pcszCmd, szArg) == 0)
+		while ((pcszCmd = NextArg(pcszCmd, szArg)))
 		{
 			// On first "-new_console" or "-cur_console" stop processing "specials"
 			if (wcsncmp(szArg, L"-new_console", iNewConLen) == 0 || wcsncmp(szArg, L"-cur_console", iNewConLen) == 0)
@@ -3313,7 +3301,7 @@ LPCWSTR CConEmuMain::ParseScriptLineOptions(LPCWSTR apszLine, bool* rpbSetActive
 
 			if (lstrcmpi(szArg, L"/bufferheight") == 0)
 			{
-				if (NextArg(&pcszCmd, szArg) == 0)
+				if ((pcszCmd = NextArg(pcszCmd, szArg)))
 				{
 					wchar_t* pszEnd = NULL;
 					if (pArgs)
@@ -3327,7 +3315,7 @@ LPCWSTR CConEmuMain::ParseScriptLineOptions(LPCWSTR apszLine, bool* rpbSetActive
 			}
 			else if (lstrcmpi(szArg, L"/dir") == 0)
 			{
-				if (NextArg(&pcszCmd, szArg) == 0)
+				if ((pcszCmd = NextArg(pcszCmd, szArg)))
 				{
 					if (pArgs)
 					{
@@ -3340,7 +3328,7 @@ LPCWSTR CConEmuMain::ParseScriptLineOptions(LPCWSTR apszLine, bool* rpbSetActive
 			}
 			else if (lstrcmpi(szArg, L"/icon") == 0)
 			{
-				if (NextArg(&pcszCmd, szArg) == 0)
+				if ((pcszCmd = NextArg(pcszCmd, szArg)))
 				{
 					if (pArgs)
 					{
@@ -3353,7 +3341,7 @@ LPCWSTR CConEmuMain::ParseScriptLineOptions(LPCWSTR apszLine, bool* rpbSetActive
 			}
 			else if (lstrcmpi(szArg, L"/tab") == 0)
 			{
-				if (NextArg(&pcszCmd, szArg) == 0)
+				if ((pcszCmd = NextArg(pcszCmd, szArg)))
 				{
 					if (pArgs)
 					{
@@ -3392,7 +3380,7 @@ CVirtualConsole* CConEmuMain::CreateConGroup(LPCWSTR apszScript, bool abForceAsA
 
 	CVConGroup::OnCreateGroupBegin();
 
-	while (0 == NextLine(&pszCursor, szLine, NLF_SKIP_EMPTY_LINES| NLF_TRIM_SPACES))
+	while ((pszCursor = NextLine(pszCursor, szLine, NLF_SKIP_EMPTY_LINES| NLF_TRIM_SPACES)))
 	{
 		lbSetActive = false;
 
@@ -3433,8 +3421,8 @@ CVirtualConsole* CConEmuMain::CreateConGroup(LPCWSTR apszScript, bool abForceAsA
 			lsTempTask = LoadConsoleBatch(pszLine, &args);
 			if (lsTempTask.IsEmpty())
 				break;
-			LPCWSTR pszTempPtr = lsTempTask.ms_Val;
-			if (0 != NextLine(&pszTempPtr, lsTempLine))
+			// We need only first line from nested task
+			if (!NextLine(lsTempTask, lsTempLine))
 				break;
 			pszLine = ParseScriptLineOptions(lsTempLine.ms_Val, NULL, &args);
 		}
@@ -4261,12 +4249,8 @@ HMODULE CConEmuMain::LoadConEmuCD()
 	if (!mh_LLKeyHookDll)
 	{
 		wchar_t szConEmuDll[MAX_PATH+32];
-		lstrcpy(szConEmuDll, ms_ConEmuBaseDir);
-#ifdef WIN64
-		lstrcat(szConEmuDll, L"\\ConEmuCD64.dll");
-#else
-		lstrcat(szConEmuDll, L"\\ConEmuCD.dll");
-#endif
+		wcscpy_c(szConEmuDll, ms_ConEmuBaseDir);
+		wcscat_c(szConEmuDll, L"\\" ConEmuCD_DLL_3264);
 		//wchar_t szSkipEventName[128];
 		//swprintf_c(szSkipEventName, CEHOOKDISABLEEVENT, GetCurrentProcessId());
 		//HANDLE hSkipEvent = CreateEvent(NULL, TRUE, TRUE, szSkipEventName);
@@ -5137,7 +5121,7 @@ void CConEmuMain::UpdateProcessDisplay(bool abForce)
 	// Не совсем корректно это в статусе процессов показывать, но пока на вкладке Info больше негде
 	wchar_t szTile[32] = L"";
 	ConEmuWindowCommand tile = GetTileMode(false);
-	if (tile)
+	if (tile != cwc_Current)
 	{
 		FormatTileMode(tile, szTile, countof(szTile)-1);
 		if (szTile[0]) wcscat_c(szTile, L" ");
@@ -5430,7 +5414,7 @@ void CConEmuMain::UpdateProgress()
 			swprintf_c(MultiTitle+nCurTtlLen, countof(MultiTitle)-nCurTtlLen/*#SECURELEN*/, L"{*%i%%} ", mn_Progress);
 	}
 
-	if (gpSetCls->IsMulti() && (gpSet->isNumberInCaption || !mp_TabBar->IsTabsShown()))
+	if (gpSetCls->IsMulti() && (gpSet->isNumberInCaption || !isTabsShown()))
 	{
 		int nCur = 1, nCount = 0;
 
@@ -6304,7 +6288,7 @@ bool CConEmuMain::isMeForeground(bool abRealAlso/*=false*/, bool abDialogsAlso/*
 
 bool CConEmuMain::isMouseOverFrame(bool abReal)
 {
-	if (m_ForceShowFrame && isSizing())
+	if ((m_ForceShowFrame != fsf_Hide) && isSizing())
 	{
 		if (!isPressed(VK_LBUTTON))
 		{
@@ -6605,6 +6589,9 @@ LRESULT CConEmuMain::OnCreate(HWND hWnd, LPCREATESTRUCT lpCreate)
 		(DWORD)(DWORD_PTR)hWnd, lpCreate->x, lpCreate->y, lpCreate->cx, lpCreate->cy, lpCreate->style, lpCreate->dwExStyle);
 	if (!LogString(szInfo)) { DEBUGSTRSIZE(szInfo); }
 
+	if (const auto theme = gpConEmu->opt.WindowTheme.GetStr())
+		gpConEmu->SetWindowTheme(hWnd, theme, nullptr);
+
 	RECT rcWndMin = {WINDOWS_ICONIC_POS, WINDOWS_ICONIC_POS, WINDOWS_ICONIC_POS+160, WINDOWS_ICONIC_POS+16};
 	SizeInfo::RequestRect(rcWndMin);
 
@@ -6694,13 +6681,12 @@ wchar_t CConEmuMain::IsConsoleBatchOrTask(LPCWSTR asSource)
 	wchar_t Supported = 0;
 
 	// If task name is quoted
-	CEStr lsTemp;
+	CmdArg lsTemp;
 	if (asSource && (*asSource == L'"'))
 	{
-		LPCWSTR pszTemp = asSource;
-		if (NextArg(&pszTemp, lsTemp) == 0)
+		if (NextArg(asSource, lsTemp))
 		{
-			asSource = lsTemp.ms_Val;
+			asSource = lsTemp.c_str();
 		}
 	}
 
@@ -6736,18 +6722,20 @@ wchar_t* CConEmuMain::LoadConsoleBatch(LPCWSTR asSource, RConStartArgsEx* pArgs 
 	}
 
 	// If task name is quoted
-	CEStr lsTemp;
+	CmdArg lsTemp;
 	if (asSource && (*asSource == L'"'))
 	{
-		LPCWSTR pszTemp = asSource;
-		if (NextArg(&pszTemp, lsTemp) == 0)
+		LPCWSTR pszTemp;
+		if ((pszTemp = NextArg(asSource, lsTemp)))
 		{
-			asSource = lsTemp.ms_Val;
+			asSource = lsTemp.c_str();
 
-			#ifdef _DEBUG
 			pszTemp = SkipNonPrintable(pszTemp);
-			_ASSERTE((!pszTemp || !*pszTemp) && "Task arguments are not supported yet");
-			#endif
+			if (pszTemp && *pszTemp)
+			{
+				// #Tasks Is it still true?
+				_ASSERTE((!pszTemp || !*pszTemp) && "Task arguments are not supported yet");
+			}
 		}
 	}
 
@@ -6851,7 +6839,7 @@ wchar_t* CConEmuMain::LoadConsoleBatch_Drops(LPCWSTR asSource)
 
 		// Считаем, что один файл (*.exe, *.cmd, ...) или ярлык (*.lnk)
 		// это одна запускаемая консоль в ConEmu.
-		CEStr szPart;
+		CmdArg szPart;
 		wchar_t szExe[MAX_PATH+1], szDir[MAX_PATH+1];
 		HRESULT hr = S_OK;
 		IShellLinkW* pShellLink = NULL;
@@ -6885,7 +6873,7 @@ wchar_t* CConEmuMain::LoadConsoleBatch_Drops(LPCWSTR asSource)
 		// Поехали
 		LPWSTR pszConsoles[MAX_CONSOLE_COUNT] = {};
 		size_t cchLen, cchAllLen = 0, iCount = 0;
-		while ((iCount < MAX_CONSOLE_COUNT) && (0 == NextArg(&asSource, szPart)))
+		while ((iCount < MAX_CONSOLE_COUNT) && (asSource = NextArg(asSource, szPart)))
 		{
 			if (lstrcmpi(PointToExt(szPart), L".lnk") == 0)
 			{
@@ -7133,28 +7121,25 @@ bool CConEmuMain::CreateStartupConsoles()
 		RConStartArgsEx args;
 		args.Detached = crb_Off;
 
-		if (args.Detached != crb_On)
+		SafeFree(args.pszSpecialCmd);
+		args.pszSpecialCmd = lstrdup(GetCmd());
+
+		CEStr lsLog(L"Creating console using command ", args.pszSpecialCmd);
+		LogString(lsLog);
+
+		if (!CreateCon(&args, TRUE))
 		{
-			SafeFree(args.pszSpecialCmd);
-			args.pszSpecialCmd = lstrdup(GetCmd());
-
-			CEStr lsLog(L"Creating console using command ", args.pszSpecialCmd);
-			LogString(lsLog);
-
-			if (!CreateCon(&args, TRUE))
+			CEStr szFailMsg(L"Can't create new virtual console!\n"
+				, L"{CConEmuMain::CreateStartupConsoles}\n"
+				, L"Command: ", GetCmd()
+				);
+			LogString(szFailMsg);
+			if (!isInsideInvalid())
 			{
-				CEStr szFailMsg(L"Can't create new virtual console!\n"
-					, L"{CConEmuMain::CreateStartupConsoles}\n"
-					, L"Command: ", GetCmd()
-					);
-				LogString(szFailMsg);
-				if (!isInsideInvalid())
-				{
-					DisplayLastError(szFailMsg, -1);
-				}
-				Destroy();
-				return false;
+				DisplayLastError(szFailMsg, -1);
 			}
+			Destroy();
+			return false;
 		}
 	}
 
@@ -7177,7 +7162,7 @@ void CConEmuMain::OnMainCreateFinished()
 		m_StartDetached = crb_Off;  // действует только на первую консоль
 	}
 
-	if (isWindowNormal() && (gpSet->isTabs == 2) && mp_TabBar->IsTabsShown())
+	if (isWindowNormal() && (gpSet->isTabs == 2) && isTabsShown())
 	{
 		SizeInfo::RequestRecalc();
 
@@ -7207,7 +7192,7 @@ void CConEmuMain::OnMainCreateFinished()
 
 	if (WindowStartMinimized)
 	{
-		_ASSERTE(!WindowStartNoClose || (WindowStartTsa && WindowStartNoClose));
+		_ASSERTE(!WindowStartNoClose || (WindowStartTsa && WindowStartNoClose));  // -V728
 
 		if (WindowStartTsa || ForceMinimizeToTray)
 		{
@@ -7887,7 +7872,7 @@ LRESULT CConEmuMain::OnFocus(HWND hWnd, UINT messg, WPARAM wParam, LPARAM lParam
 		{
 			// Logging
 			bool bNeedLog = RELEASEDEBUGTEST((gpSet->isLogging(2)!=0),true);
-			if (bNeedLog)
+			if (bNeedLog)  // -V575
 			{
 				HWND hFocus = GetFocus();
 				wchar_t szInfo[128];
@@ -8258,6 +8243,66 @@ void CConEmuMain::RefreshWindowStyles()
 	//OnTransparent();
 }
 
+void CConEmuMain::ReloadEnvironmentVariables()
+{
+	const wchar_t dbg_msg[] = L"Reloading environment variables from system registry";
+	if (!LogString(dbg_msg)) DEBUGSTRSETCHANGE(dbg_msg);
+
+
+	auto new_environment = std::make_shared<SystemEnvironment>();
+	new_environment->LoadFromRegistry();
+
+	const auto& old_data = saved_environment_->env_data;
+	const auto& new_data = new_environment->env_data;
+	for (const auto& old_var : old_data)
+	{
+		if (!new_data.count(old_var.first))
+		{
+			std::wstring dbg_log(L"  Erased: `" + old_var.second.name
+				+ L"`, old value: `" + old_var.second.data + L"`");
+			if (!LogString(dbg_log.c_str())) DEBUGSTRSETCHANGE(dbg_log.c_str());
+
+			SetEnvironmentVariable(old_var.second.name.c_str(), nullptr);
+		}
+	}
+	for (const auto& new_var : new_data)
+	{
+		auto old_iter = old_data.find(new_var.first);
+		if (old_iter == old_data.end()
+			|| (old_iter->second.data != new_var.second.data))
+		{
+			std::wstring old_value((old_iter == old_data.end())
+					? std::wstring(L"Absent")
+					: std::wstring(L"`" + old_iter->second.data + L"`"));
+			std::wstring dbg_log(L"  Changed: `" + new_var.second.name
+				+ L"`, new value: `" + new_var.second.data + L"`, old_value: "
+				+ old_value);
+			if (!LogString(dbg_log.c_str())) DEBUGSTRSETCHANGE(dbg_log.c_str());
+
+			if (new_var.second.expandable)
+			{
+				CEStr value(ExpandEnvStr(new_var.second.data.c_str()));
+				if (!value.IsEmpty())
+				{
+					SetEnvironmentVariable(new_var.second.name.c_str(), value);
+					continue;
+				}
+			}
+			SetEnvironmentVariable(new_var.second.name.c_str(), new_var.second.data.c_str());
+		}
+	}
+
+	std::lock_guard<std::mutex> lock(saved_environment_mutex_);
+	saved_environment_ = new_environment;
+}
+
+std::shared_ptr<SystemEnvironment> CConEmuMain::GetEnvironmentVariables() const
+{
+	std::lock_guard<std::mutex> lock(saved_environment_mutex_);
+	std::shared_ptr<SystemEnvironment> data = saved_environment_;
+	return data;
+}
+
 void CConEmuMain::OnGlobalSettingsChanged()
 {
 	UpdateGuiInfoMapping();
@@ -8547,7 +8592,7 @@ void CConEmuMain::OnSwitchGuiFocus(SwitchGuiFocusOp FocusOp)
 {
 	if (!((FocusOp > sgf_None) && (FocusOp < sgf_Last)))
 	{
-		Assert((FocusOp > sgf_None) && (FocusOp < sgf_Last));
+		Assert((FocusOp > sgf_None) && (FocusOp < sgf_Last));  // -V571
 		return;
 	}
 
@@ -9462,10 +9507,12 @@ void CConEmuMain::CheckActiveLayoutName()
 	{
 		// Startup keyboard layout must be detected
 		wcscat_c(szInfo, L"\niUnused==-1");
-		AssertMsg(szInfo);
+		//AssertMsg(szInfo); -- gh-1606
+		LogString(szInfo);
 	}
 }
 
+/// Called from CheckActiveLayoutName, OnLangChange, OnLangeChangeConsole
 void CConEmuMain::StoreLayoutName(int iIdx, DWORD dwLayout, HKL hkl)
 {
 	_ASSERTE(iIdx>=0 && iIdx<countof(m_LayoutNames) && !m_LayoutNames[iIdx].bUsed);
@@ -11457,7 +11504,7 @@ BOOL CConEmuMain::OnMouse_NCBtnDblClk(HWND hWnd, UINT& messg, WPARAM wParam, LPA
 			return FALSE;
 		}
 
-		ChandeTileMode((wParam == HTLEFT || wParam == HTRIGHT) ? cwc_TileWidth : cwc_TileHeight);
+		ChangeTileMode((wParam == HTLEFT || wParam == HTRIGHT) ? cwc_TileWidth : cwc_TileHeight);
 
 		return TRUE;
 	}
@@ -11607,20 +11654,15 @@ void CConEmuMain::CheckFocus(LPCWSTR asFrom)
 							else
 							{
 								DEBUGSTRFOREGROUND(L"Activating ConEmu on desktop by mouse click\n");
-								mouse.bForceSkipActivation = TRUE; // не пропускать этот клик в консоль!
-								// Запомнить, где курсор сейчас. Вернуть надо будет
+								mouse.bForceSkipActivation = true;  // don't pass this click into the console!
+								// Remember, where was the cursor. Revert the position later
 								POINT ptCur; GetCursorPos(&ptCur);
-								SetCursorPos(pt.x,pt.y); // мышку обязательно "подвинуть", иначе mouse_event не сработает
-								// "кликаем"
+								SetCursorPos(pt.x,pt.y);  // Need to "move" the mouse, otherwise mouse_event will not work
+								// "clicking"
 								mouse_event(MOUSEEVENTF_ABSOLUTE+MOUSEEVENTF_LEFTDOWN, pt.x,pt.y, 0,0);
 								mouse_event(MOUSEEVENTF_ABSOLUTE+MOUSEEVENTF_LEFTUP, pt.x,pt.y, 0,0);
-								// Вернуть курсор
+								// Revert the cursor position
 								SetCursorPos(ptCur.x,ptCur.y);
-								//
-								//#ifdef _DEBUG -- очередь еще не обработана системой...
-								//HWND hPost = GetForegroundWindow();
-								//DEBUGSTRFOREGROUND((hPost==ghWnd) ? L"ConEmu on desktop activation Succeeded\n" : L"ConEmu on desktop activation FAILED\n");
-								//#endif
 							}
 						}
 					}
@@ -11830,7 +11872,7 @@ LRESULT CConEmuMain::OnSetCursor(WPARAM wParam/*=-1*/, LPARAM lParam/*=-1*/)
 				}
 			}
 			else if (ht == HTCAPTION && gpSet->isHideCaptionAlways()
-				&& (!mp_TabBar || !mp_TabBar->IsTabsShown()
+				&& (!isTabsShown()
 					|| (IsWin10() && gpSet->nTabsLocation))
 				)
 			{
@@ -11965,7 +12007,7 @@ LRESULT CConEmuMain::OnSetCursor(WPARAM wParam/*=-1*/, LPARAM lParam/*=-1*/)
 		}
 		else if (pRCon->isSelectionPresent())
 		{
-			if (gpSet->isCTSIBeam)
+			if (gpSet->isCTSIBeam && (pVCon && !pVCon->CheckMouseOverScroll()))
 				hCur = mh_CursorIBeam; // LoadCursor(NULL, IDC_IBEAM);
 		}
 		else if ((etr = pRCon->GetLastTextRangeType()) != etr_None)
@@ -12483,7 +12525,7 @@ void CConEmuMain::OnTimer_Main(CVirtualConsole* pVCon)
 	{
 		if (!bForeground)
 		{
-			if (m_ForceShowFrame)
+			if (m_ForceShowFrame != fsf_Hide)
 			{
 				StopForceShowFrame();
 			}
@@ -12525,7 +12567,7 @@ void CConEmuMain::OnTimer_Main(CVirtualConsole* pVCon)
 			}
 		}
 	}
-	else if (m_ForceShowFrame)
+	else if (m_ForceShowFrame != fsf_Hide)
 	{
 		StopForceShowFrame();
 	}
@@ -12643,21 +12685,33 @@ void CConEmuMain::OnTimer_ActivateSplit()
 	if (!PTDIFFTEST(mouse.ptLastSplitOverCheck, SPLITOVERCHECK_DELTA))
 	{
 		mouse.ptLastSplitOverCheck = ptCur;
+		bool isChildGui = false;
 		if (!isIconic()
 			&& (hForeWnd == ghWnd
 				|| (mp_Inside && mp_Inside->isParentProcess(hForeWnd))
-				|| CVConGroup::isOurGuiChildWindow(hForeWnd)
+				|| (isChildGui = CVConGroup::isOurGuiChildWindow(hForeWnd))
 			))
 		{
 			// Курсор над ConEmu?
-			RECT rcClient = CalcRect(CER_MAIN);
+			RECT rcClient = SizeInfo::WindowRect();
 			// Проверяем, в какой из VCon попадает курсор?
 			if (PtInRect(&rcClient, ptCur))
 			{
 				if (CVConGroup::GetVConFromPoint(ptCur, &VConFromPoint))
 				{
-					bool bActive = VConFromPoint->isActive(false);
-					if (!bActive)
+					bool needActivate = !VConFromPoint->isActive(false);
+					if (isChildGui)
+					{
+						HWND hCursorWnd = WindowFromPoint(ptCur);
+						if (hCursorWnd && CVConGroup::isOurGuiChildWindow(hCursorWnd))
+						{
+							RECT rcFore{};
+							GetWindowRect(hCursorWnd, &rcFore);
+							if (PtInRect(&rcFore, ptCur))
+								needActivate = false;
+						}
+					}
+					if (needActivate)
 					{
 						CVConGuard VCon;
 						// Если был активирован GUI CHILD - то фокус нужно сначала поставить в ConEmu
@@ -13441,7 +13495,7 @@ LRESULT CConEmuMain::OnActivateByMouse(HWND hWnd, UINT messg, WPARAM wParam, LPA
 	//return MA_ACTIVATEANDEAT; -- ест все подряд, а LBUTTONUP пропускает :(
 	this->mouse.nSkipEvents[0] = 0;
 	this->mouse.nSkipEvents[1] = 0;
-	this->mouse.bTouchActivation = FALSE;
+	this->mouse.bTouchActivation = false;
 
 	bool bSkipActivation = false;
 
@@ -13449,25 +13503,28 @@ LRESULT CConEmuMain::OnActivateByMouse(HWND hWnd, UINT messg, WPARAM wParam, LPA
 	{
 		RECT rcWork = WorkspaceRect();
 		POINT ptCur = {}; GetCursorPos(&ptCur);
-		MapWindowPoints(NULL, ghWnd, &ptCur, 1);
+		MapWindowPoints(ghWnd, NULL, (LPPOINT)&rcWork, 2);
 		if (PtInRect(&rcWork, ptCur))
 		{
 			bSkipActivation = true;
-			mp_TabBar->ActivateSearchPane(false);
+			CVConGuard VCon;
+			if (CVConGroup::GetVConFromPoint(ptCur, &VCon)
+				&& !VCon->CheckMouseOverScroll())
+			{
+				mp_TabBar->ActivateSearchPane(false);
+			}
 		}
 	}
 
-	if (this->mouse.bForceSkipActivation  // принудительная активация окна, лежащего на Desktop
+	if (this->mouse.bForceSkipActivation  // force activation of the Windows which is a child of Desktop
 		|| bSkipActivation
 		|| (gpSet->isMouseSkipActivation
 			&& (LOWORD(lParam) == HTCLIENT)
 			&& (bTouchActivation || !(m_Foreground.ForegroundState & (fgf_ConEmuMain|fgf_InsideParent))))
 		)
 	{
-		this->mouse.bForceSkipActivation = FALSE; // Однократно
+		this->mouse.bForceSkipActivation = false; // Once
 		POINT ptMouse = {0}; GetCursorPos(&ptMouse);
-		//RECT  rcDC = {0}; GetWindowRect('ghWnd DC', &rcDC);
-		//if (PtInRect(&rcDC, ptMouse))
 		if (IsGesturesEnabled() || CVConGroup::GetVConFromPoint(ptMouse))
 		{
 			DEBUGSTRFOCUS(L"!Skipping mouse activation message!");
@@ -13486,7 +13543,7 @@ LRESULT CConEmuMain::OnActivateByMouse(HWND hWnd, UINT messg, WPARAM wParam, LPA
 			else if (HIWORD(lParam) == 0x0246/*WM_POINTERDOWN*/)
 			{
 				// Following real WM_LBUTTONDOWN activation is expected
-				this->mouse.bTouchActivation = TRUE;
+				this->mouse.bTouchActivation = true;
 			}
 			else
 			{
@@ -13700,6 +13757,18 @@ LRESULT CConEmuMain::WndProc(HWND hWnd, UINT messg, WPARAM wParam, LPARAM lParam
 
 		case WM_SETTINGCHANGE:
 		{
+			const wchar_t* change_verb = nullptr;
+			const wchar_t kEnvironmentVerb[] = L"Environment";
+			wchar_t szDbg[128]; swprintf_c(szDbg, L"WM_SETTINGCHANGE: W=x%04X, L=x%04X", (DWORD)wParam, (DWORD)lParam);
+			if (lParam && !IsBadStringPtr((LPCWSTR)lParam, 64))
+			{
+				change_verb = (LPCWSTR)lParam;
+				wcscat_c(szDbg, L", ");
+				size_t cur_len = wcslen(szDbg);
+				lstrcpyn(szDbg + cur_len, change_verb, std::size(szDbg) - cur_len);
+			}
+			if (!LogString(szDbg)) DEBUGSTRSETCHANGE(szDbg);
+
 			if (wParam == SPI_SETWORKAREA)
 			{
 				ReloadMonitorInfo();
@@ -13708,8 +13777,14 @@ LRESULT CConEmuMain::WndProc(HWND hWnd, UINT messg, WPARAM wParam, LPARAM lParam
 			if (wParam == SPI_SETWORKAREA)
 			{
 				auto wm = GetWindowMode();
-				if (wm != wmNormal)
+				if (wm != wmNormal && !isIconic() && isMeForeground())
 					SetWindowMode(wm);
+			}
+
+			if (change_verb && 0 == wcscmp(change_verb, kEnvironmentVerb)
+				&& gpSet->AutoReloadEnvironment && !gpConEmu->opt.NoAutoEnvReload)
+			{
+				ReloadEnvironmentVariables();
 			}
 		} break;
 
@@ -13719,7 +13794,7 @@ LRESULT CConEmuMain::WndProc(HWND hWnd, UINT messg, WPARAM wParam, LPARAM lParam
 			OnDisplayChanged(LOWORD(wParam), LOWORD(lParam), HIWORD(lParam));
 			result = ::DefWindowProc(hWnd, messg, wParam, lParam);
 			auto wm = GetWindowMode();
-			if (wm != wmNormal)
+			if (wm != wmNormal && !isIconic() && isMeForeground())
 				SetWindowMode(wm);
 		} break;
 		case /*0x02E0*/ WM_DPICHANGED:
@@ -14104,7 +14179,7 @@ LRESULT CConEmuMain::WndProc(HWND hWnd, UINT messg, WPARAM wParam, LPARAM lParam
 			//}
 			else if (messg == this->mn_PostConsoleResize)
 			{
-				this->OnConsoleResize(TRUE);
+				this->OnConsoleResize();
 				return 0;
 			}
 			else if (messg == this->mn_ConsoleLangChanged)

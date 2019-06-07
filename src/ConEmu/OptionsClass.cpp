@@ -36,9 +36,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "version.h"
 
 #include <commctrl.h>
-#pragma warning(disable: 4091)
-#include <shlobj.h>
-#pragma warning(default: 4091)
+#include "../common/shlobj.h"
+
 
 #ifdef __GNUC__
 #include "ShObjIdl_Part.h"
@@ -2182,7 +2181,7 @@ INT_PTR CSettings::wndOpProc(HWND hWnd2, UINT messg, WPARAM wParam, LPARAM lPara
 							CSetPgBase* pg = gpSetCls->GetActivePageObj();
 							if (pg && !pg->QueryDialogCancel())
 								break;
-						}
+						}  // -V796
 					case IDOK:
 					case IDCLOSE:
 						// -- перенесено в WM_CLOSE
@@ -2859,7 +2858,7 @@ BOOL CSettings::RegisterTipsForChild(HWND hChild, LPARAM lParam)
 	// Register tooltip by child HWND
 	if (gpSetCls->hwndTip)
 	{
-		BOOL lbRc = FALSE;
+		bool lbRc = false;
 		HWND hEdit = NULL;
 
 		// Associate the ToolTip with the tool.

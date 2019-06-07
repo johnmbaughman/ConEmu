@@ -64,10 +64,9 @@ bool CAltNumpad::isAltNumpad()
 	SHORT sNumLock = GetKeyState(VK_NUMLOCK);
 	if (!(sNumLock & 1))
 		return false;
-	if (!isPressed(VK_LMENU))
+	if (!isPressed(VK_MENU))
 		return false;
-	if (isPressed(VK_RMENU)
-		|| isPressed(VK_SHIFT) || isPressed(VK_CONTROL)
+	if (isPressed(VK_SHIFT) || isPressed(VK_CONTROL)
 		|| isPressed(VK_LWIN) || isPressed(VK_RWIN))
 		return false;
 	return true;
@@ -169,7 +168,7 @@ bool CAltNumpad::OnKeyboard(HWND hWnd, UINT messg, WPARAM wParam, LPARAM lParam)
 		{
 			_ASSERTE(bSkip == false); // bypass to console
 		}
-		// If user have chosen to bypass Alt+GrayPlus to consol
+		// If user have chosen to bypass Alt+GrayPlus to console
 		else if ((wParam == VK_ADD) && !isUseAltGrayPlus())
 		{
 			_ASSERTE(bSkip == false); // bypass to console
@@ -227,9 +226,8 @@ bool CAltNumpad::OnKeyboard(HWND hWnd, UINT messg, WPARAM wParam, LPARAM lParam)
 		)
 	{
 		if (((wParam >= VK_NUMPAD0) && (wParam <= VK_NUMPAD9))
-			|| ((mn_NumberBase == 16) && (wParam >= '0' && wParam <= '9'))
-			|| ((wParam >= 'A') && (wParam <= 'F'))
-			|| ((wParam >= 'a') && (wParam <= 'f'))
+			|| ((mn_NumberBase == 16)
+				&& ((wParam >= '0' && wParam <= '9') || (wParam >= 'A' && wParam <= 'F')))
 			)
 		{
 			// Capture mode was already started above: StartCapture(10, (wParam - VK_NUMPAD0), false)
@@ -240,8 +238,6 @@ bool CAltNumpad::OnKeyboard(HWND hWnd, UINT messg, WPARAM wParam, LPARAM lParam)
 				nDigit = LOBYTE(wParam - VK_NUMPAD0);
 			else if ((wParam >= 'A') && (wParam <= 'F'))
 				nDigit = LOBYTE(10 + (wParam - 'A'));
-			else if ((wParam >= 'a') && (wParam <= 'f'))
-				nDigit = LOBYTE(10 + (wParam - 'a'));
 			else if (wParam >= '0' && wParam <= '9')
 				nDigit = LOBYTE(wParam - '0');
 			mn_AltNumber = mn_AltNumber * mn_NumberBase + nDigit;

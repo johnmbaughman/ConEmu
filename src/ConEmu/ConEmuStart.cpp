@@ -42,6 +42,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "OptionsClass.h"
 #include "SetCmdTask.h"
 
+#include "../common/EnvVar.h"
 #include "../common/Monitors.h"
 #include "../common/StartupEnvDef.h"
 #include "../common/WFiles.h"
@@ -484,9 +485,9 @@ bool CConEmuStart::GetCfgParm(LPCWSTR& cmdLineRest, CESwitch& Val, int nMaxLen, 
 
 	// Сохраним, может для сообщения об ошибке понадобится
 	LPCWSTR pszName = cmdLineRest;
-	CEStr szGetCfgParmTemp;
+	CmdArg szGetCfgParmTemp;
 
-	if (NextArg(&cmdLineRest, szGetCfgParmTemp) != 0)
+	if (!(cmdLineRest = NextArg(cmdLineRest, szGetCfgParmTemp)))
 	{
 		return false;
 	}
@@ -590,7 +591,7 @@ bool CConEmuStart::ParseCommandLine(LPCWSTR pszCmdLine, int& iResult)
 	LPCWSTR cmdLineRest = SkipNonPrintable(opt.cmdLine);
 	LPCWSTR pszName, pszArgStart;
 	LPCWSTR psUnknown = NULL;
-	CEStr   szArg, szNext;
+	CmdArg  szArg, szNext;
 	CEStr   szExeName, szExeNameOnly;
 
 	// Set %ConEmuArgs% env var
@@ -607,7 +608,7 @@ bool CConEmuStart::ParseCommandLine(LPCWSTR pszCmdLine, int& iResult)
 
 
 	// Check the first argument in the command line (most probably it will be our executable path/name)
-	if (NextArg(&pszTemp, szArg) != 0)
+	if (!(pszTemp = NextArg(pszTemp, szArg)))
 	{
 		_ASSERTE(FALSE && "GetCommandLine() is empty");
 		// Treat as empty command line, allow to start
@@ -632,7 +633,7 @@ bool CConEmuStart::ParseCommandLine(LPCWSTR pszCmdLine, int& iResult)
 	if (cmdLineRest && *cmdLineRest)
 	{
 		pszTemp = cmdLineRest;
-		if (NextArg(&pszTemp, szArg) == 0)
+		if ((pszTemp = NextArg(pszTemp, szArg)))
 		{
 			if ((*szArg.ms_Val != L'/')
 				&& (*szArg.ms_Val != L'-')
@@ -668,13 +669,13 @@ bool CConEmuStart::ParseCommandLine(LPCWSTR pszCmdLine, int& iResult)
 		pszCopyToEnvStart = cmdLineRest;
 		opt.cfgSwitches.Set(pszCopyToEnvStart);
 
-		while (NextArg(&cmdLineRest, szArg, &pszArgStart) == 0)
+		while ((cmdLineRest = NextArg(cmdLineRest, szArg, &pszArgStart)))
 		{
 			bool lbNotFound = false;
 
 			TODO("Replace NeedNextArg with GetCfgParm?")
 			#define NeedNextArg() \
-				if (NextArg(&cmdLineRest, szNext) != 0) { iResult = CERR_CARGUMENT; goto wrap; }
+				if (!(cmdLineRest = NextArg(cmdLineRest, szNext))) { iResult = CERR_CARGUMENT; goto wrap; }
 
 
 			if (!szArg.IsPossibleSwitch())
@@ -790,7 +791,7 @@ bool CConEmuStart::ParseCommandLine(LPCWSTR pszCmdLine, int& iResult)
 
 					_ASSERTE(opt.runCommand.IsEmpty());
 					pszTemp = cmdLineRest;
-					if ((NextArg(&pszTemp, szNext) == 0)
+					if ((pszTemp = NextArg(pszTemp, szNext))
 						&& szNext.OneOfSwitches(L"-run",L"-cmd"))
 					{
 						opt.runCommand.Set(pszTemp);
@@ -960,8 +961,8 @@ bool CConEmuStart::ParseCommandLine(LPCWSTR pszCmdLine, int& iResult)
 						gpConEmu->AppendExtraArgs(L"-lngfile", szNext);
 					}
 				}
-				// имя шрифта
-				else if (szArg.IsSwitch(L"-font"))
+				// Change font name
+				else if (szArg.IsSwitch(L"-Font"))
 				{
 					NeedNextArg();
 
@@ -971,8 +972,8 @@ bool CConEmuStart::ParseCommandLine(LPCWSTR pszCmdLine, int& iResult)
 						gpConEmu->AppendExtraArgs(L"-font", szNext);
 					}
 				}
-				// Высота шрифта
-				else if (szArg.IsSwitch(L"-size"))
+				// Change font height
+				else if (szArg.IsSwitch(L"-FontSize") || szArg.IsSwitch(L"-Size"))
 				{
 					NeedNextArg();
 
@@ -1033,6 +1034,10 @@ bool CConEmuStart::ParseCommandLine(LPCWSTR pszCmdLine, int& iResult)
 				{
 					opt.NoAutoClose = true;
 				}
+				else if (szArg.IsSwitch(L"-NoAutoEnvReload"))
+				{
+					opt.NoAutoEnvReload = true;
+				}
 				else if (szArg.IsSwitch(L"-here"))
 				{
 					gpConEmu->mb_ConEmuHere = true;
@@ -1046,6 +1051,11 @@ bool CConEmuStart::ParseCommandLine(LPCWSTR pszCmdLine, int& iResult)
 				{
 					// This one has more weight than AutoUpdateOnStart
 					gpConEmu->opt.DisableAutoUpdate = true;
+				}
+				else if (szArg.IsSwitch(L"-NoHooksWarn"))
+				{
+					// Don't try to warn users about known problems with third-party detours
+					gpConEmu->opt.NoHooksWarn = true;
 				}
 				else if (szArg.OneOfSwitches(L"-NoKeyHook", L"-NoKeyHooks", L"-NoKeybHook", L"-NoKeybHooks"))
 				{
@@ -1266,6 +1276,16 @@ bool CConEmuStart::ParseCommandLine(LPCWSTR pszCmdLine, int& iResult)
 						gpConEmu->opt.Monitor.Exists = true;
 						gpConEmu->opt.Monitor.Type = sw_Int;
 						gpStartEnv->hStartMon = gpConEmu->opt.Monitor.Mon;
+					}
+				}
+				else if (szArg.IsSwitch(L"-Theme"))
+				{
+					const wchar_t* kDefaultTheme = L"DarkMode_Explorer";
+					bool bParm = false;
+					if (!cmdLineRest || (*cmdLineRest == L'-' || *cmdLineRest == L'/')
+						|| !GetCfgParm(cmdLineRest, bParm, gpConEmu->opt.WindowTheme, 128))
+					{
+						gpConEmu->opt.WindowTheme.SetStr(kDefaultTheme);
 					}
 				}
 				else if (szArg.OneOfSwitches(L"-Buffer", L"-BufferHeight"))
